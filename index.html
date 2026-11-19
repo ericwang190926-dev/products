@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>包装刀版设计工具 · Dieline Studio</title>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand"><span class="logo">▣</span> 包装刀版设计工具 <small>Dieline Studio · 单位 mm</small></div>
+    <div class="cur" id="curStyle"></div>
+    <div class="actions">
+      <button id="btnNew" title="清空图稿">新建</button>
+      <label class="btn" title="打开 .json 项目">打开项目<input type="file" id="fileProject" accept=".json,application/json" hidden /></label>
+      <button id="btnSave">保存项目</button>
+      <span class="sep"></span>
+      <button class="primary" id="expPDF">导出 PDF 刀版</button>
+      <button id="expSVG">SVG</button>
+      <button id="expDXF">DXF</button>
+      <button id="expFlat">平面图 PNG</button>
+      <button id="exp3D">3D 图 PNG</button>
+    </div>
+  </header>
+  <aside id="lib">
+    <input id="search" type="search" placeholder="搜索盒型，如 扣底 / 飞机盒 / tuck" />
+    <div id="styleList"></div>
+  </aside>
+  <main id="center">
+    <div id="viewbar">
+      <div class="seg" id="viewMode">
+        <button data-mode="2d">刀版 / 平面</button><button data-mode="split" class="on">分屏</button><button data-mode="3d">3D 预览</button>
+      </div>
+      <div class="layers" id="layerToggles"></div>
+    </div>
+    <div id="views" class="split">
+      <section id="v2d">
+        <svg id="svg2d" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="floatbar"><button id="zoomFit" title="适合窗口">适合</button><button id="zoomIn">＋</button><button id="zoomOut">－</button></div>
+        <div class="legend"><i class="lc"></i>刀线(切) <i class="lr"></i>压痕线 <i class="lb"></i>出血 <i class="lg"></i>粘胶区</div>
+      </section>
+      <section id="v3d">
+        <div id="three"></div>
+        <div class="ctrl3d">
+          <button id="playFold">▶ 折叠动画</button>
+          <label>折叠 <input type="range" id="fold" min="0" max="1" step="0.01" value="1" /></label>
+          <label>开盖 <input type="range" id="open" min="0" max="1" step="0.01" value="0" /></label>
+          <button id="resetView">重置视角</button>
+        </div>
+      </section>
+    </div>
+  </main>
+  <aside id="props">
+    <div class="tabs" id="propTabs"><button data-tab="struct" class="on">尺寸结构</button><button data-tab="art">图稿设计</button></div>
+    <div id="tabStruct" class="tab"></div>
+    <div id="tabArt" class="tab" hidden></div>
+  </aside>
+</div>
+<div id="toast"></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
