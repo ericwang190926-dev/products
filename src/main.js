@@ -1,6 +1,12 @@
 import './style.css';
 import { STYLES, STYLE_MAP, CATEGORIES } from './core/styles/index.js';
-import { MATERIALS } from './core/styles/common.js';
+import {
+  STRUCTURES, FACE_KINDS, SPECIAL_TYPES, FLUTES, COATED_GSM, BOARD_GSM, GREY_GSM,
+  LAMINATION, PROCESSES, PROCESS_MAP, ADVANCED_PARAMS, MATERIALS,
+  defaultMaterialFor, resolvedThickness, materialSummary, materialShort,
+  materialFromLegacy, quoteInfoLines, kindName,
+} from './core/materials.js';
+import { usedProcesses, regionsByProcess } from './core/finish.js';
 import { buildGeometry } from './core/model.js';
 import { FACE_NAMES } from './core/builder.js';
 import { createView2D, elementSize } from './ui/view2d.js';
@@ -11,19 +17,38 @@ import { buildSVG, buildDXF } from './export/vector.js';
 
 const $ = (s) => document.querySelector(s);
 const state = {
-  styleId: 'hanger', dims: { ...STYLE_MAP.hanger.defaults }, materialId: 'card350', t: 0.5, bleed: 3, params: {},
+  styleId: 'hanger', dims: { ...STYLE_MAP.hanger.defaults },
+  mat: defaultMaterialFor('hanger'), materialId: 'card350', t: 0.5, faceT: 0, bleed: 3, params: {},
   boxColor: '#ffffff', boardColor: '#f1ede4', faceColors: {}, elements: [], selected: null, selectedFace: 'front',
-  layers: { art: true, cut: true, crease: true, bleed: true, glue: true, dims: true, labels: true },
+  selectedFinish: null, lamination: 'none', finishRegions: [], drawFinish: false, finishUid: 1,
+  layers: { art: true, cut: true, crease: true, bleed: true, glue: true, dims: true, labels: true, finish: true },
   dimsTouched: false, materialTouched: false,
 };
+function syncMaterial() {
+  const r = resolvedThickness(state.mat);
+  state.t = r.t; state.faceT = r.faceT;
+  const hit = MATERIALS.find((m) => m.mat && m.mat.structure === state.mat.structure
+    && (state.mat.structure === 'corrugated' ? m.mat.flute === state.mat.flute
+      : m.mat.boardGsm === state.mat.boardGsm && (m.mat.faceKind || 'board') === (state.mat.faceKind || 'board')));
+  state.materialId = hit && Math.abs((hit.t) - state.t) < 0.03 ? hit.id : 'custom';
+}
+syncMaterial();
 let geo = null; let uid = 1;
 const toast = (msg) => { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2200); };
 window.__app = { state, get geo() { return geo; } };
 
 const view2d = createView2D($('#svg2d'), {
-  select: (id, face) => { state.selected = id; if (face) state.selectedFace = face; render2D(); renderArtPanel(); if (face && !id) switchTab('art'); },
+  select: (id, face) => { state.selected = id; if (face) state.selectedFace = face; if (id) { const r = state.finishRegions.find((x) => x.type === 'el' && x.elementId === id); state.selectedFinish = r ? r.id : null; } render2D(); renderArtPanel(); renderStruct(); if (face && !id && !state.drawFinish) switchTab('art'); },
   changed: () => { render2D(); scheduleTexture(); renderArtPanel(); },
   dragging: () => scheduleTexture(),
+  finishRect: (face, x, y, w, h) => {
+    const r = { id: 'f' + state.finishUid++, type: 'rect', face, x, y, w, h, rot: 0, processes: ['foil-gold'] };
+    state.finishRegions.push(r); state.selectedFinish = r.id; state.drawFinish = false;
+    $('#svg2d').classList.remove('draw-finish');
+    render2D(); scheduleTexture(); renderArtPanel(); renderStruct();
+    toast('已在盒面上画了一块区域，默认先做烫金，可在右侧改成别的工艺');
+    switchTab('art');
+  },
 });
 const view3d = createView3D($('#three'));
 let texPending = false;
@@ -32,14 +57,14 @@ function render2D(opts) { view2d.render(geo, state, opts); }
 
 function rebuild({ refit = false } = {}) {
   try {
-    geo = buildGeometry(state.styleId, { ...state.dims, t: state.t, bleed: state.bleed, params: state.params });
+    geo = buildGeometry(state.styleId, { ...state.dims, t: state.t, bleed: state.bleed, params: state.params, wrap: state.mat.structure === 'rigid', turnIn: state.mat.turnIn ?? 15, faceT: state.faceT });
   } catch (e) { console.error(e); toast('参数无效：' + e.message); return; }
   if (!geo.faces.find((f) => f.id === state.selectedFace)) state.selectedFace = geo.faces[0]?.id || null;
   render2D({ fit: refit });
   view3d.setGeometry(geo, state, { refit });
   view3d.setFold(+$('#fold').value, +$('#open').value);
   renderStruct(); renderArtPanel();
-  const st = geo.style; $('#curStyle').textContent = `${st.name} · ${st.en}　|　内尺寸 ${fmtDims()} mm　|　${matName()} ${state.t}mm`;
+  const st = geo.style; $('#curStyle').textContent = `${st.name}　|　内尺寸 ${fmtDims()} mm　|　${materialShort(state.mat, state.t)}`;
   document.querySelectorAll('.card').forEach((c) => c.classList.toggle('on', c.dataset.id === state.styleId));
 }
 const fmtDims = () => { const d = STYLE_MAP[state.styleId].dims; return ['L', 'W', 'H'].filter((k) => d[k]).map((k) => state.dims[k]).join(' × '); };
@@ -71,58 +96,183 @@ $('#search').addEventListener('input', (e) => renderLibrary(e.target.value));
 function selectStyle(id) {
   const st = STYLE_MAP[id]; state.styleId = id; state.params = {};
   if (!state.dimsTouched) state.dims = { ...st.defaults };
-  if (!state.materialTouched) { const m = MATERIALS.find((x) => x.id === (st.material || 'card350')); state.materialId = m.id; state.t = m.t; }
+  if (!state.materialTouched) { state.mat = defaultMaterialFor(id); syncMaterial(); }
   rebuild({ refit: true });
 }
 
 // ---------------- structure panel ----------------
 function num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : null; }
+function tip(label, hint) { return hint ? `<span class="tip" title="${escAttr(hint)}">${label}</span>` : label; }
+function escAttr(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function gsmPicks(id, values, current) {
+  const known = values.includes(+current);
+  let h = `<div class="gsm-picks" data-gsm-group="${id}">`;
+  for (const g of values) h += `<button type="button" class="gsm ${+current === g ? 'on' : ''}" data-gsm-group="${id}" data-gsm="${g}">${g}g</button>`;
+  h += `<label class="gsm-custom">其他<input type="number" data-gsm-custom="${id}" min="50" max="3000" step="1" value="${known ? '' : current}" placeholder="克重"/></label></div>`;
+  return h;
+}
+function paramBlock(params, advanced) {
+  const list = params.filter((p) => advanced === ADVANCED_PARAMS.has(p.key));
+  if (!list.length) return '';
+  let h = '';
+  const c = geo.ctx;
+  for (const p of list) {
+    const auto = state.params[p.key] === undefined || state.params[p.key] === null;
+    const lab = tip(p.label, p.hint);
+    if (p.type === 'bool') h += `<div class="row"><label>${lab}</label><label><input type="checkbox" data-param="${p.key}" ${c.p[p.key] ? 'checked' : ''}/> 启用</label></div>`;
+    else h += `<div class="row"><label>${lab}</label><input type="number" step="0.5" data-param="${p.key}" placeholder="自动 ${(+p.def(c)).toFixed(1)}" value="${auto ? '' : state.params[p.key]}"/></div>`;
+  }
+  return h;
+}
 function renderStruct() {
-  const st = geo.style, c = geo.ctx; const d = st.dims;
+  const st = geo.style, c = geo.ctx; const d = st.dims; const mat = state.mat;
   let h = `<div class="sec"><h3>${st.name}</h3><p class="desc">${st.desc}</p></div>`;
-  h += `<div class="sec"><h3>内尺寸 (mm) <button class="small" id="useDefaults" title="恢复该盒型推荐尺寸">推荐尺寸</button></h3><div class="dims3">`;
+  h += `<div class="sec"><h3>盒子尺寸 (mm) <button class="small" id="useDefaults" title="恢复该盒型推荐尺寸">推荐尺寸</button></h3>`;
+  h += `<p class="desc">这里填的是<strong>产品放进去的尺寸（内尺寸）</strong>，不是盒子外面量到的大小。工具会按纸板厚度自动加放。</p><div class="dims3">`;
   for (const k of ['L', 'W', 'H']) if (d[k]) h += `<div><span>${d[k]}</span><input type="number" step="0.5" min="1" data-dim="${k}" value="${state.dims[k]}"/></div>`;
   h += `</div></div>`;
-  h += `<div class="sec"><h3>材质 / 纸厚</h3><div class="row"><label>材质</label><select id="matSel">${MATERIALS.map((m) => `<option value="${m.id}" ${m.id === state.materialId ? 'selected' : ''}>${m.name}（${m.t}mm）</option>`).join('')}<option value="custom" ${state.materialId === 'custom' ? 'selected' : ''}>自定义</option></select></div>`;
-  h += `<div class="row"><label>纸厚 t</label><input type="number" id="thick" step="0.05" min="0.1" max="8" value="${state.t}"/></div>`;
-  h += `<div class="row"><label>出血</label><input type="number" id="bleed" step="0.5" min="0" max="10" value="${state.bleed}"/></div></div>`;
-  if (st.params.length) {
-    h += `<div class="sec"><h3>结构参数 <button class="small" id="resetParams">全部自动</button></h3>`;
-    for (const p of st.params) {
-      const auto = state.params[p.key] === undefined || state.params[p.key] === null;
-      if (p.type === 'bool') h += `<div class="row"><label>${p.label}</label><label><input type="checkbox" data-param="${p.key}" ${c.p[p.key] ? 'checked' : ''}/> 启用</label></div>`;
-      else h += `<div class="row"><label>${p.label}</label><input type="number" step="0.5" data-param="${p.key}" placeholder="自动 ${(+p.def(c)).toFixed(1)}" value="${auto ? '' : state.params[p.key]}"/></div>`;
+
+  h += `<div class="sec" id="materialSec"><h3>用料</h3><div class="summary">${materialSummary(mat, state.t)}</div>`;
+  h += `<div class="field"><span class="lbl">盒子做法</span><div class="struct-opts">`;
+  for (const s of STRUCTURES) h += `<label class="${mat.structure === s.id ? 'on' : ''}"><input type="radio" name="structure" id="struct-${s.id}" value="${s.id}" ${mat.structure === s.id ? 'checked' : ''} hidden/><span class="nm">${s.name}</span><span class="hp">${s.hint}</span></label>`;
+  h += `</div></div>`;
+  if (mat.structure === 'carton') {
+    h += `<div class="field"><span class="lbl">${tip('纸的种类', '折叠彩盒一般用白卡纸；如果客户指定铜版纸或特种纸，这里改一下即可。')}</span><div class="chips" id="faceKindCarton">`;
+    for (const k of FACE_KINDS) h += `<span class="chip ${mat.faceKind === k.id ? 'on' : ''}" data-face-kind="${k.id}" title="${escAttr(k.hint)}">${k.name}</span>`;
+    h += `</div></div>`;
+    if (mat.faceKind === 'special') {
+      h += `<div class="field"><span class="lbl">特种纸种类</span><div class="chips" id="specialType">`;
+      for (const k of SPECIAL_TYPES) h += `<span class="chip ${mat.specialType === k.id ? 'on' : ''}" data-special="${k.id}" title="${escAttr(k.hint)}">${k.name}</span>`;
+      h += `</div></div>`;
     }
-    h += `<p class="desc">留空 = 按尺寸与纸厚自动计算。</p></div>`;
+    h += `<div class="field"><span class="lbl">${tip('克重', '纸张的重量，数字越大纸越厚。常见彩盒用 300g 或 350g。')}</span>${gsmPicks('boardGsm', BOARD_GSM, mat.boardGsm)}</div>`;
+  } else if (mat.structure === 'rigid') {
+    h += `<div class="field"><span class="lbl">${tip('灰板克重', '礼盒骨架用的灰板。常用 1000g、1200g、1400g，数字越大板越厚越结实。')}</span>${gsmPicks('boardGsm', GREY_GSM, mat.boardGsm)}</div>`;
+    h += `<div class="field"><span class="lbl">${tip('外面裱的纸', '贴在灰板外面、用来印刷图案的那一层纸。')}</span><div class="chips" id="faceKindRigid">`;
+    for (const k of FACE_KINDS.filter((x) => x.id !== 'board')) h += `<span class="chip ${mat.faceKind === k.id ? 'on' : ''}" data-face-kind="${k.id}" title="${escAttr(k.hint)}">${k.name}</span>`;
+    h += `</div></div>`;
+    if (mat.faceKind === 'special') {
+      h += `<div class="field"><span class="lbl">特种纸种类</span><div class="chips" id="specialType">`;
+      for (const k of SPECIAL_TYPES) h += `<span class="chip ${mat.specialType === k.id ? 'on' : ''}" data-special="${k.id}" title="${escAttr(k.hint)}">${k.name}</span>`;
+      h += `</div></div>`;
+    }
+    h += `<div class="field"><span class="lbl">${tip('裱纸克重', '面纸的重量。铜版纸常用 157g 或 200g。')}</span>${gsmPicks('faceGsm', COATED_GSM, mat.faceGsm)}</div>`;
+  } else {
+    h += `<div class="field"><span class="lbl">${tip('瓦楞粗细', '中间波浪芯的规格。细瓦更适合印刷，中瓦、双瓦更抗压。')}</span><div class="struct-opts">`;
+    for (const fl of FLUTES) h += `<label class="${mat.flute === fl.id ? 'on' : ''}"><input type="radio" name="flute" value="${fl.id}" ${mat.flute === fl.id ? 'checked' : ''} hidden/><span class="nm">${fl.name}</span><span class="hp">${fl.hint}</span></label>`;
+    h += `</div></div>`;
   }
-  const t = state.t, bb = geo.bbox, bl = geo.bboxBleed;
-  h += `<div class="sec"><h3>尺寸信息</h3><div class="info">`;
-  h += `面板尺寸(中性层) <b>${c.A.toFixed(1)} × ${c.B.toFixed(1)} × ${c.D.toFixed(1)}</b><br/>`;
-  h += `成品外尺寸 ≈ <b>${(c.L + 2 * t).toFixed(1)} × ${(c.W + 2 * t).toFixed(1)} × ${(c.H + 2 * t).toFixed(1)}</b><br/>`;
-  h += `展开尺寸 <b>${bb.w.toFixed(1)} × ${bb.h.toFixed(1)}</b><br/>含出血 <b>${bl.w.toFixed(1)} × ${bl.h.toFixed(1)}</b><br/>`;
+  h += `</div>`;
+
+  const vis = paramBlock(st.params, false);
+  if (vis) h += `<div class="sec"><h3>这个盒子还可以调</h3>${vis}</div>`;
+
+  h += `<div class="sec"><h3>${tip('包装工艺', '印完之后再做的表面效果，比如烫金、局部发亮、压出凹凸。给供应商报价时会单独出这些层。')}</h3>`;
+  h += `<div class="field"><span class="lbl">整盒覆膜</span><div class="chips" id="lamination">`;
+  for (const l of LAMINATION) h += `<span class="chip ${state.lamination === l.id ? 'on' : ''}" data-lam="${l.id}" title="${escAttr(l.hint)}">${l.name}</span>`;
+  h += `</div></div>`;
+  h += `<p class="desc">局部工艺可以加在已经放好的 Logo / 文字上，也可以在盒面上自己画一块区域。</p>`;
+  h += `<div class="btns"><button class="small" id="btnDrawFinish">${state.drawFinish ? '正在画区域…再点取消' : '在盒面上画一块区域'}</button></div>`;
+  if (state.finishRegions.length) {
+    h += `<div style="margin-top:8px">`;
+    for (const r of state.finishRegions) {
+      const names = (r.processes || []).map((id) => PROCESS_MAP[id]?.name || id).join('、') || '还未选工艺';
+      const where = r.type === 'el' ? `图稿 ${(state.elements.find((e) => e.id === r.elementId)?.name || state.elements.find((e) => e.id === r.elementId)?.text || r.elementId)}` : `${FACE_NAMES[r.face] || r.face} 上的一块区域`;
+      h += `<div class="fin ${r.id === state.selectedFinish ? 'on' : ''}" data-finish="${r.id}"><div class="head"><span class="nm">${where}</span><button class="small" data-del-finish="${r.id}">✕</button></div><div class="meta">${names}</div></div>`;
+    }
+    h += `</div>`;
+  }
+  const target = state.selectedFinish ? state.finishRegions.find((r) => r.id === state.selectedFinish)
+    : (state.selected ? (state.finishRegions.find((r) => r.type === 'el' && r.elementId === state.selected) || { processes: [] }) : null);
+  if (state.selected || state.selectedFinish) {
+    const procs = target?.processes || [];
+    h += `<div class="field" style="margin-top:8px"><span class="lbl">${state.selectedFinish ? '这块区域要做的工艺（可多选）' : '给当前选中的图稿做的工艺（可多选）'}</span><div class="proc-grid">`;
+    for (const p of PROCESSES) h += `<label class="${procs.includes(p.id) ? 'on' : ''}" style="color:${p.color}" title="${escAttr(p.hint)}"><input type="checkbox" data-proc="${p.id}" ${procs.includes(p.id) ? 'checked' : ''}/> ${p.name}</label>`;
+    h += `</div></div>`;
+  }
+  h += `</div>`;
+
+  const adv = paramBlock(st.params, true);
+  h += `<div class="sec"><details class="advanced"><summary>高级设置（一般不用改）</summary>`;
+  h += `<div class="row"><label>${tip('多印边', '图案多印出来的边，防止切开时切歪了露出白边。一般 3mm 即可。')}</label><input type="number" id="bleed" step="0.5" min="0" max="10" value="${state.bleed}"/></div>`;
+  if (mat.structure === 'rigid') h += `<div class="row"><label>${tip('裱纸包边', '面纸折进盒子里面的宽度，礼盒常用 15mm。')}</label><input type="number" id="turnIn" step="0.5" min="8" max="30" value="${mat.turnIn ?? 15}"/></div>`;
+  h += `<div class="row"><label>${tip('手动指定板厚', '一般不用填。只有你已经量过实际厚度、想覆盖按克重估算的值时才改。')}</label><input type="number" id="thick" step="0.05" min="0" max="8" placeholder="自动 ${state.t.toFixed(2)}" value="${mat.tOverride ?? ''}"/></div>`;
+  if (adv) { h += `<p class="desc" style="margin-top:8px">下面这些结构尺寸会按纸厚自动算，留空即可。</p>${adv}<div class="btns"><button class="small" id="resetParams">全部自动</button></div>`; }
+  h += `</details></div>`;
+
+  const tt = state.t, bb = geo.bbox, bl = geo.bboxBleed;
+  h += `<div class="sec"><h3>算出来的尺寸</h3><div class="info">`;
+  h += `成品外面大约 <b>${(c.L + 2 * tt).toFixed(1)} × ${(c.W + 2 * tt).toFixed(1)} × ${(c.H + 2 * tt).toFixed(1)}</b> mm（已加上纸厚）<br/>`;
+  h += `刀版展开 <b>${bb.w.toFixed(1)} × ${bb.h.toFixed(1)}</b> mm<br/>算上多印边 <b>${bl.w.toFixed(1)} × ${bl.h.toFixed(1)}</b> mm<br/>`;
   const cutLen = geo.cut.reduce((s, l) => s + l.slice(1).reduce((a, p, i) => a + Math.hypot(p[0] - l[i][0], p[1] - l[i][1]), 0), 0);
   const crLen = geo.crease.reduce((s, l) => s + Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]), 0);
-  h += `刀线总长 <b>${(cutLen / 1000).toFixed(2)} m</b>，压痕线 <b>${(crLen / 1000).toFixed(2)} m</b></div>`;
+  h += `切开的线大约 <b>${(cutLen / 1000).toFixed(2)} m</b>，折的线 <b>${(crLen / 1000).toFixed(2)} m</b></div>`;
   for (const n of geo.notes) h += `<div class="note">${n}</div>`;
-  h += `<p class="desc" style="margin-top:8px">输入为内尺寸；面板按纸张中性层 (内尺寸 + t) 计算，盖/外套自动加纸厚与间隙。</p></div>`;
+  h += `</div>`;
   $('#tabStruct').innerHTML = h;
+  $('#svg2d').classList.toggle('draw-finish', !!state.drawFinish);
 }
 let dimTimer;
+function applyMatChange() { state.mat.tOverride = null; state.materialTouched = true; syncMaterial(); rebuild(); }
 $('#tabStruct').addEventListener('input', (e) => {
   const el = e.target;
   clearTimeout(dimTimer);
   dimTimer = setTimeout(() => {
     if (el.dataset.dim) { const v = num(el.value); if (v && v > 0) { state.dims[el.dataset.dim] = v; state.dimsTouched = true; rebuild({ refit: true }); } }
-    else if (el.id === 'thick') { const v = num(el.value); if (v && v > 0) { state.t = v; state.materialId = MATERIALS.find((m) => m.t === v)?.id || 'custom'; state.materialTouched = true; rebuild(); } }
+    else if (el.id === 'thick') { const v = el.value === '' ? null : num(el.value); state.mat.tOverride = (v && v > 0) ? v : null; state.materialTouched = true; syncMaterial(); rebuild(); }
     else if (el.id === 'bleed') { const v = num(el.value); if (v !== null && v >= 0) { state.bleed = v; rebuild(); } }
+    else if (el.id === 'turnIn') { const v = num(el.value); if (v && v > 0) { state.mat.turnIn = v; state.materialTouched = true; rebuild(); } }
+    else if (el.dataset.gsmCustom) { const v = num(el.value); if (v && v > 0) { state.mat[el.dataset.gsmCustom] = v; applyMatChange(); } }
     else if (el.dataset.param) { const k = el.dataset.param; if (el.type === 'checkbox') state.params[k] = el.checked; else state.params[k] = el.value === '' ? null : num(el.value); rebuild(); }
+    else if (el.dataset.proc) { toggleProcess(el.dataset.proc, el.checked); }
   }, el.type === 'checkbox' ? 0 : 350);
 });
-$('#tabStruct').addEventListener('change', (e) => { if (e.target.id === 'matSel') { const m = MATERIALS.find((x) => x.id === e.target.value); state.materialId = e.target.value; if (m) state.t = m.t; state.materialTouched = true; rebuild(); } });
+$('#tabStruct').addEventListener('change', (e) => {
+  const el = e.target;
+  if (el.name === 'structure') {
+    const next = defaultMaterialFor(el.value === 'rigid' ? 'lidbase' : el.value === 'corrugated' ? 'mailer' : 'ste');
+    next.structure = el.value;
+    if (el.value === 'carton' && state.mat.faceKind) { next.faceKind = state.mat.faceKind; next.specialType = state.mat.specialType; next.boardGsm = state.mat.structure === 'carton' ? state.mat.boardGsm : 350; }
+    if (el.value === 'rigid') { next.boardGsm = 1200; next.faceKind = state.mat.faceKind === 'board' ? 'coated' : (state.mat.faceKind || 'coated'); next.faceGsm = state.mat.faceGsm || 157; next.specialType = state.mat.specialType; }
+    state.mat = next; applyMatChange();
+  }
+  if (el.name === 'flute') { state.mat.flute = el.value; applyMatChange(); }
+});
 $('#tabStruct').addEventListener('click', (e) => {
+  const gsmBtn = e.target.closest('button.gsm');
+  if (gsmBtn) { state.mat[gsmBtn.dataset.gsmGroup] = +gsmBtn.dataset.gsm; applyMatChange(); return; }
+  const faceKind = e.target.closest('[data-face-kind]');
+  if (faceKind) { state.mat.faceKind = faceKind.dataset.faceKind; if (state.mat.structure === 'carton') state.mat.faceGsm = state.mat.boardGsm; applyMatChange(); return; }
+  const sp = e.target.closest('[data-special]');
+  if (sp) { state.mat.specialType = sp.dataset.special; applyMatChange(); return; }
+  const lam = e.target.closest('[data-lam]');
+  if (lam) { state.lamination = lam.dataset.lam; scheduleTexture(); render2D(); renderStruct(); return; }
+  const fin = e.target.closest('[data-finish]');
+  if (fin && !e.target.dataset.delFinish) { state.selectedFinish = fin.dataset.finish; state.selected = null; renderStruct(); renderArtPanel(); render2D(); return; }
+  if (e.target.dataset.delFinish) { state.finishRegions = state.finishRegions.filter((r) => r.id !== e.target.dataset.delFinish); if (state.selectedFinish === e.target.dataset.delFinish) state.selectedFinish = null; renderStruct(); render2D(); scheduleTexture(); return; }
+  if (e.target.id === 'btnDrawFinish') { state.drawFinish = !state.drawFinish; $('#svg2d').classList.toggle('draw-finish', state.drawFinish); if (state.drawFinish) toast('在左边刀版图的某个面上拖出一块矩形'); renderStruct(); return; }
   if (e.target.id === 'resetParams') { state.params = {}; rebuild(); }
   if (e.target.id === 'useDefaults') { state.dims = { ...STYLE_MAP[state.styleId].defaults }; state.dimsTouched = false; rebuild({ refit: true }); }
 });
+
+function ensureFinishForSelection() {
+  if (state.selectedFinish) return state.finishRegions.find((r) => r.id === state.selectedFinish);
+  if (state.selected) {
+    let r = state.finishRegions.find((x) => x.type === 'el' && x.elementId === state.selected);
+    if (!r) { r = { id: 'f' + state.finishUid++, type: 'el', elementId: state.selected, processes: [] }; state.finishRegions.push(r); }
+    return r;
+  }
+  return null;
+}
+function toggleProcess(id, on) {
+  const r = ensureFinishForSelection(); if (!r) return;
+  const set = new Set(r.processes || []);
+  if (on) set.add(id); else set.delete(id);
+  r.processes = [...set];
+  if (!r.processes.length && r.type === 'el') state.finishRegions = state.finishRegions.filter((x) => x !== r);
+  state.selectedFinish = r.processes.length || r.type === 'rect' ? r.id : state.selectedFinish;
+  renderStruct(); renderArtPanel(); render2D(); scheduleTexture();
+}
 
 // ---------------- artwork panel ----------------
 const faceInfo = (id) => geo.faces.find((f) => f.id === id);
@@ -151,7 +301,11 @@ function renderArtPanel() {
         if (el.type === 'image') h += rng('w', '宽度', 2, lim * 2, 0.5); else h += rng('size', '字号', 1, lim / 2, 0.5);
         h += rng('rot', '旋转°', -180, 180, 1);
         if (el.type === 'text') h += `<div class="row"><label>内容</label><textarea data-k="text" rows="2" style="grid-column: span 2">${el.text}</textarea></div><div class="row"><label>颜色</label><input type="color" data-k="color" value="${el.color}"/><label><input type="checkbox" data-k="bold" ${el.bold ? 'checked' : ''}/>粗</label></div>`;
-        h += `<div class="btns"><button class="small" data-act="center">居中</button>${el.type === 'image' ? '<button class="small" data-act="fill">铺满此面(含出血)</button><button class="small" data-act="fit">适应此面</button>' : ''}<button class="small" data-act="rot90">旋转 90°</button><button class="small" data-act="dup">复制到…</button></div>`;
+        h += `<div class="btns"><button class="small" data-act="center">居中</button>${el.type === 'image' ? '<button class="small" data-act="fill">铺满此面(含多印边)</button><button class="small" data-act="fit">适应此面</button>' : ''}<button class="small" data-act="rot90">旋转 90°</button><button class="small" data-act="dup">复制到…</button></div>`;
+        const procs = (state.finishRegions.find((r) => r.type === 'el' && r.elementId === el.id) || { processes: [] }).processes || [];
+        h += `<div class="field" style="margin-top:8px"><span class="lbl">这块图稿要做的工艺（可多选）</span><div class="proc-grid">`;
+        for (const p of PROCESSES) h += `<label class="${procs.includes(p.id) ? 'on' : ''}" style="color:${p.color}" title="${p.hint.replace(/"/g, '&quot;')}"><input type="checkbox" data-proc="${p.id}" ${procs.includes(p.id) ? 'checked' : ''}/> ${p.name}</label>`;
+        h += `</div></div>`;
       }
       h += `</div>`;
     }
@@ -181,6 +335,7 @@ $('#tabArt').addEventListener('change', (e) => {
 });
 $('#tabArt').addEventListener('input', (e) => {
   const t = e.target;
+  if (t.dataset.proc) { if (t.closest('.el')) state.selected = t.closest('.el').dataset.id; toggleProcess(t.dataset.proc, t.checked); return; }
   if (t.id === 'boxColor') { state.boxColor = t.value; artChanged(); return; }
   if (t.id === 'boardColor') { state.boardColor = t.value; scheduleTexture(); return; }
   if (t.id === 'faceColor') { state.faceColors[state.selectedFace] = t.value; artChanged(); const dot = document.querySelector(`.chip[data-face="${state.selectedFace}"] .dot`); if (dot) dot.style.background = t.value; return; }
@@ -191,6 +346,7 @@ $('#tabArt').addEventListener('input', (e) => {
 });
 $('#tabArt').addEventListener('click', (e) => {
   const t = e.target;
+  if (t.dataset.proc) { if (t.closest('.el')) state.selected = t.closest('.el').dataset.id; toggleProcess(t.dataset.proc, t.checked); return; }
   const chip = t.closest('.chip'); if (chip) { state.selectedFace = chip.dataset.face; state.selected = null; renderArtPanel(); render2D(); return; }
   if (t.id === 'faceColorClear') { delete state.faceColors[state.selectedFace]; renderArtPanel(); artChanged(); return; }
   if (t.id === 'addText') { const f = faceInfo(state.selectedFace); const el = { id: 'e' + uid++, type: 'text', face: f.id, text: '品牌名称', size: Math.max(3, Math.min(30, f.w * 0.12)), color: '#1f2329', bold: true, x: 0, y: 0, rot: 0 }; state.elements.push(el); state.selected = el.id; renderArtPanel(); artChanged(); return; }
@@ -246,7 +402,7 @@ function demoArtwork() {
 function switchTab(tab) { document.querySelectorAll('#propTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab)); $('#tabStruct').hidden = tab !== 'struct'; $('#tabArt').hidden = tab !== 'art'; }
 $('#propTabs').addEventListener('click', (e) => e.target.dataset.tab && switchTab(e.target.dataset.tab));
 $('#viewMode').addEventListener('click', (e) => { const m = e.target.dataset.mode; if (!m) return; document.querySelectorAll('#viewMode button').forEach((b) => b.classList.toggle('on', b === e.target)); $('#views').className = m === 'split' ? 'split' : 'm' + m; setTimeout(() => view2d.fitView(), 30); });
-const LAYER_NAMES = { art: '图稿', cut: '刀线', crease: '压痕线', bleed: '出血', glue: '粘胶区', dims: '尺寸', labels: '面标注' };
+const LAYER_NAMES = { art: '图稿', cut: '刀线', crease: '压痕线', bleed: '多印边', glue: '涂胶位置', dims: '尺寸', labels: '面标注', finish: '工艺' };
 $('#layerToggles').innerHTML = Object.entries(LAYER_NAMES).map(([k, n]) => `<label><input type="checkbox" data-layer="${k}" checked/>${n}</label>`).join('');
 $('#layerToggles').addEventListener('change', (e) => { state.layers[e.target.dataset.layer] = e.target.checked; render2D(); });
 $('#zoomFit').onclick = () => view2d.fitView(); $('#zoomIn').onclick = () => view2d.zoom(1 / 1.25); $('#zoomOut').onclick = () => view2d.zoom(1.25);
@@ -259,27 +415,40 @@ $('#resetView').onclick = () => view3d.resetView();
 const baseName = () => `${geo.style.id}_${fmtDims().replace(/ × /g, 'x')}mm`;
 function download(name, data, type) { const blob = data instanceof Blob ? data : new Blob([data], { type }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 const dataURLtoBytes = (u) => { const b = atob(u.split(',')[1]); const a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; };
+function processLayers() {
+  const by = regionsByProcess(state, geo);
+  return usedProcesses(state).map((p) => ({ id: p.id, name: p.name, pdfSpot: p.pdfSpot, color: p.color, cmyk: p.cmyk, polys: (by[p.id] || []).map((x) => x.poly) })).filter((p) => p.polys.length);
+}
 function infoLines() {
-  const c = geo.ctx; const d = geo.style.dims;
-  return [`Dieline: ${geo.style.en}   (${geo.style.id})`, `Inner size ${['L', 'W', 'H'].filter((k) => d[k]).map((k) => `${k} ${state.dims[k]}`).join(' x ')} mm   Board t = ${state.t} mm   Bleed ${state.bleed} mm`, `Flat size ${geo.bbox.w.toFixed(1)} x ${geo.bbox.h.toFixed(1)} mm (with bleed ${geo.bboxBleed.w.toFixed(1)} x ${geo.bboxBleed.h.toFixed(1)})   Panels (mid-plane) ${c.A.toFixed(1)} / ${c.B.toFixed(1)} / ${c.D.toFixed(1)}`, `Generated ${new Date().toISOString().slice(0, 10)} - Dieline Studio. Layers: Artwork / Glue / Bleed / Crease / Cut / Dimensions / Labels`];
+  const c = geo.ctx, t = state.t;
+  const outer = [c.L + 2 * t, c.W + 2 * t, c.H + 2 * t];
+  const lines = quoteInfoLines({
+    style: geo.style, dims: state.dims, mat: state.mat, t: state.t, faceT: state.faceT,
+    bleed: state.bleed, bbox: geo.bbox, bboxBleed: geo.bboxBleed,
+    lamination: state.lamination, finishRegions: state.finishRegions, outer,
+  });
+  const day = new Date();
+  const local = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+  lines.push(`生成日期 ${local}（当地时间） · 包装刀版设计工具`);
+  return lines;
 }
 function exportPDF() {
   const hasArt = true;
   const { canvas } = renderFlat(geo, state, { ppm: 300 / 25.4, maxPx: 6000, background: '#ffffff' });
   const jpg = canvas.toDataURL('image/jpeg', 0.9);
-  const pdf = buildPDF(geo, { art: hasArt ? { bytes: dataURLtoBytes(jpg), w: canvas.width, h: canvas.height } : null, info: infoLines() });
+  const pdf = buildPDF(geo, { art: hasArt ? { bytes: dataURLtoBytes(jpg), w: canvas.width, h: canvas.height } : null, info: infoLines(), processLayers: processLayers() });
   download(baseName() + '_dieline.pdf', new Blob([pdf], { type: 'application/pdf' }));
-  toast('已导出 PDF（图层：图稿 / 粘胶 / 出血 / 压痕 / 刀线 / 尺寸）');
+  toast('已导出 PDF（含刀线、压痕和工艺专色图层，可供供应商报价）');
   return pdf;
 }
 $('#expPDF').onclick = exportPDF;
-$('#expSVG').onclick = () => { const { canvas } = renderFlat(geo, state, { ppm: 6, maxPx: 4000 }); download(baseName() + '_dieline.svg', buildSVG(geo, { artDataUrl: canvas.toDataURL('image/png') }), 'image/svg+xml'); };
+$('#expSVG').onclick = () => { const { canvas } = renderFlat(geo, state, { ppm: 6, maxPx: 4000 }); download(baseName() + '_dieline.svg', buildSVG(geo, { artDataUrl: canvas.toDataURL('image/png'), processLayers: processLayers() }), 'image/svg+xml'); };
 $('#expDXF').onclick = () => download(baseName() + '_dieline.dxf', buildDXF(geo), 'application/dxf');
 $('#expFlat').onclick = () => { const { canvas } = renderFlat(geo, state, { ppm: 8, maxPx: 6000, lines: true, background: '#ffffff' }); canvas.toBlob((b) => download(baseName() + '_flat.png', b)); };
 $('#exp3D').onclick = () => download(baseName() + '_3d.png', new Blob([dataURLtoBytes(view3d.snapshot(2))], { type: 'image/png' }));
 $('#btnSave').onclick = () => {
-  const { styleId, dims, materialId, t, bleed, params, boxColor, boardColor, faceColors, elements } = state;
-  download(baseName() + '.json', JSON.stringify({ app: 'dieline-studio', version: 1, styleId, dims, materialId, t, bleed, params, boxColor, boardColor, faceColors, elements }, null, 1), 'application/json');
+  const { styleId, dims, materialId, t, bleed, params, boxColor, boardColor, faceColors, elements, mat, lamination, finishRegions, faceT } = state;
+  download(baseName() + '.json', JSON.stringify({ app: 'dieline-studio', version: 2, styleId, dims, materialId, t, faceT, bleed, params, boxColor, boardColor, faceColors, elements, mat, lamination, finishRegions }, null, 1), 'application/json');
 };
 $('#fileProject').addEventListener('change', (e) => {
   const file = e.target.files[0]; if (!file) return; const r = new FileReader();
@@ -288,13 +457,17 @@ $('#fileProject').addEventListener('change', (e) => {
 });
 function loadProject(p) {
   if (p.app !== 'dieline-studio' || !STYLE_MAP[p.styleId]) throw new Error('不是有效的刀版项目');
-  Object.assign(state, { styleId: p.styleId, dims: p.dims, materialId: p.materialId, t: p.t, bleed: p.bleed ?? 3, params: p.params || {}, boxColor: p.boxColor, boardColor: p.boardColor, faceColors: p.faceColors || {}, elements: p.elements || [], selected: null, dimsTouched: true, materialTouched: true });
+  const mat = p.mat || materialFromLegacy(p.materialId, p.t);
+  Object.assign(state, { styleId: p.styleId, dims: p.dims, mat, materialId: p.materialId, t: p.t, bleed: p.bleed ?? 3, params: p.params || {}, boxColor: p.boxColor, boardColor: p.boardColor, faceColors: p.faceColors || {}, elements: p.elements || [], selected: null, selectedFinish: null, lamination: p.lamination || 'none', finishRegions: p.finishRegions || [], dimsTouched: true, materialTouched: true, drawFinish: false });
+  syncMaterial();
+  if (p.t != null && p.mat && p.mat.tOverride == null && Math.abs(state.t - p.t) > 0.02) { state.mat.tOverride = p.t; syncMaterial(); }
   uid = 1 + Math.max(0, ...state.elements.map((e) => parseInt(String(e.id).slice(1)) || 0));
+  state.finishUid = 1 + Math.max(0, ...state.finishRegions.map((r) => parseInt(String(r.id).slice(1)) || 0));
   let pending = 0;
   for (const el of state.elements) if (el.type === 'image' && !imageCache.get(el.src)?.complete) { pending++; const im = new Image(); im.onload = () => { imageCache.set(el.src, im); if (--pending === 0) artChanged(); }; im.src = el.src; imageCache.set(el.src, im); }
   rebuild({ refit: true });
 }
-window.__app.loadProject = loadProject; window.__app.exportPDF = () => exportPDF(); window.__app.selectStyle = selectStyle; window.__app.demo = () => demoArtwork();
+window.__app.loadProject = loadProject; window.__app.exportPDF = () => exportPDF(); window.__app.selectStyle = selectStyle; window.__app.demo = () => demoArtwork(); window.__app.rebuild = () => rebuild(); window.__app.refresh = () => { render2D(); scheduleTexture(); renderStruct(); renderArtPanel(); };
 $('#btnNew').onclick = () => { if (confirm('清空当前图稿？（结构参数保留）')) { state.elements = []; state.faceColors = {}; state.boxColor = '#ffffff'; renderArtPanel(); artChanged(); } };
 
 renderLibrary();

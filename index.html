@@ -37,7 +37,7 @@
       <section id="v2d">
         <svg id="svg2d" xmlns="http://www.w3.org/2000/svg"></svg>
         <div class="floatbar"><button id="zoomFit" title="适合窗口">适合</button><button id="zoomIn">＋</button><button id="zoomOut">－</button></div>
-        <div class="legend"><i class="lc"></i>刀线(切) <i class="lr"></i>压痕线 <i class="lb"></i>出血 <i class="lg"></i>粘胶区</div>
+        <div class="legend"><i class="lc"></i><span class="lg-tip" title="工厂沿这条线把纸切开">刀线</span> <i class="lr"></i><span class="lg-tip" title="这条线是要折起来的位置">压痕线</span> <i class="lb"></i><span class="lg-tip" title="图案多印出来的边，防止切歪了露出白边">多印边</span> <i class="lg"></i><span class="lg-tip" title="涂胶水的位置">涂胶位置</span></div>
       </section>
       <section id="v3d">
         <div id="three"></div>
@@ -51,7 +51,7 @@
     </div>
   </main>
   <aside id="props">
-    <div class="tabs" id="propTabs"><button data-tab="struct" class="on">尺寸结构</button><button data-tab="art">图稿设计</button></div>
+    <div class="tabs" id="propTabs"><button data-tab="struct" class="on">尺寸和用料</button><button data-tab="art">图稿和工艺</button></div>
     <div id="tabStruct" class="tab"></div>
     <div id="tabArt" class="tab" hidden></div>
   </aside>

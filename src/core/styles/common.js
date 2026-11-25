@@ -125,13 +125,4 @@ export function tray(b, { pre = '', x0, y0, A, B, D, t, double = true, faces = {
   return { base, walls, f };
 }
 
-export const MATERIALS = [
-  { id: 'card300', name: '300g 白卡纸', t: 0.4 },
-  { id: 'card350', name: '350g 白卡/灰底白板', t: 0.5 },
-  { id: 'card400', name: '400g 白卡纸', t: 0.6 },
-  { id: 'kraft', name: '牛皮卡 350g', t: 0.55 },
-  { id: 'eflute', name: 'E 瓦楞 (E-flute)', t: 1.5 },
-  { id: 'bflute', name: 'B 瓦楞 (B-flute)', t: 3 },
-  { id: 'grey2', name: '灰板 2mm (精装)', t: 2 },
-  { id: 'grey15', name: '灰板 1.5mm (精装)', t: 1.5 },
-];
+export { MATERIALS } from '../materials.js';

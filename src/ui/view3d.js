@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { computeFold, foldedBBox } from '../core/fold.js';
 import { centroid, bbox } from '../core/geom.js';
-import { renderFlat } from '../render/raster.js';
+import { renderFlat, renderFinishMaps } from '../render/raster.js';
 
 export function createView3D(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
@@ -45,9 +45,9 @@ export function createView3D(container) {
     meshes = [];
     const bb = geo.bboxBleed;
     frontMat?.dispose(); backMat?.dispose(); bulgeFront?.dispose(); bulgeBack?.dispose();
-    frontMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0, side: THREE.FrontSide });
+    frontMat = new THREE.MeshPhysicalMaterial({ roughness: 0.55, metalness: 0, side: THREE.FrontSide, clearcoat: 0 });
     backMat = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.BackSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
-    bulgeFront = new THREE.MeshStandardMaterial({ roughness: 0.5, side: THREE.FrontSide, alphaTest: 0.5 });
+    bulgeFront = new THREE.MeshPhysicalMaterial({ roughness: 0.5, side: THREE.FrontSide, alphaTest: 0.5 });
     bulgeBack = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.BackSide, alphaTest: 0.5 });
     for (const p of geo.panels) {
       let sg;
@@ -80,8 +80,24 @@ export function createView3D(container) {
     mx.fillStyle = '#000'; mx.fillRect(0, 0, mc.width, mc.height); mx.setTransform(mc.width / bb.w, 0, 0, mc.height / bb.h, (-bb.x * mc.width) / bb.w, (-bb.y * mc.height) / bb.h);
     mx.fillStyle = '#fff'; mx.beginPath(); for (const p of geo.panels) { p.poly.forEach((q, i) => (i ? mx.lineTo(q[0], q[1]) : mx.moveTo(q[0], q[1]))); mx.closePath(); } mx.fill();
     maskTex?.dispose(); maskTex = new THREE.CanvasTexture(mc);
-    frontMat.map = tex; frontMat.needsUpdate = true; bulgeFront.map = tex; bulgeFront.needsUpdate = true;
+    frontMat.map = tex; bulgeFront.map = tex;
     backMat.color.set(state.boardColor); bulgeBack.color.set(state.boardColor); bulgeBack.alphaMap = maskTex; bulgeBack.needsUpdate = true; bulgeFront.alphaMap = maskTex;
+    const maps = renderFinishMaps(geo, state, { ppm, maxPx: 2048 });
+    const asTex = (cv) => { const t2 = new THREE.CanvasTexture(cv); t2.colorSpace = THREE.NoColorSpace; t2.anisotropy = tex.anisotropy; return t2; };
+    for (const mat of [frontMat, bulgeFront]) {
+      mat.roughnessMap?.dispose(); mat.metalnessMap?.dispose(); mat.bumpMap?.dispose();
+      if (maps.hasFinish) {
+        mat.roughnessMap = asTex(maps.roughness); mat.roughness = 1;
+        mat.metalnessMap = asTex(maps.metalness); mat.metalness = 1;
+        mat.bumpMap = asTex(maps.bump); mat.bumpScale = maps.hasSculpt ? 1.1 : 0.45;
+        mat.clearcoat = maps.hasUV ? 0.55 : (state.lamination === 'matte' ? 0 : 0.08);
+        mat.clearcoatRoughness = state.lamination === 'matte' ? 0.5 : 0.12;
+      } else {
+        mat.roughnessMap = null; mat.metalnessMap = null; mat.bumpMap = null;
+        mat.roughness = 0.55; mat.metalness = 0; mat.bumpScale = 0; mat.clearcoat = 0;
+      }
+      mat.needsUpdate = true;
+    }
   }
 
   function update() {
@@ -99,7 +115,10 @@ export function createView3D(container) {
         const sgn = p.angle >= 179 ? 1 : Math.sign(n.dot(C.clone().sub(P))) || -1; const d = n.multiplyScalar(sgn * layer * delta);
         off.makeTranslation(d.x, d.y, d.z);
       }
-      m.matrix.copy(viewM).multiply(off).multiply(M); m.matrixWorldNeedsUpdate = true;
+      const half = (geo.ctx.t || 0) / 2;
+      const zOff = new THREE.Matrix4();
+      if (!m.userData.extra && half) zOff.makeTranslation(0, 0, m.userData.side === 'b' ? -half : half);
+      m.matrix.copy(viewM).multiply(off).multiply(M).multiply(zOff); m.matrixWorldNeedsUpdate = true;
     }
     // centre model at origin, ground below
     root.position.set(0, 0, 0); root.updateMatrixWorld(true);

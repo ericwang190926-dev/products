@@ -1,5 +1,6 @@
 // Canvas renderer for flat artwork (used for 3D textures, PNG export and PDF/SVG artwork layer).
 import { FACE_EN, KIND_EN } from '../core/builder.js';
+import { regionsByProcess, usedProcesses } from '../core/finish.js';
 
 export const imageCache = new Map();
 export function getImage(el) {
@@ -68,6 +69,62 @@ export function renderFlat(geo, state, { ppm = 4, lines = false, maxPx = 4096, b
   if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, cv.width, cv.height); }
   ctx.setTransform(ppm, 0, 0, ppm, -bb.x * ppm, -bb.y * ppm);
   paintArtwork(ctx, geo, state);
+  paintFinishColor(ctx, geo, state);
   if (lines) drawLines(ctx, geo, { lw: Math.max(0.25, 1.2 / ppm) });
   return { canvas: cv, ppm, bbox: bb };
 }
+
+
+const FOIL_HEX = { 'foil-gold': '#d4a017', 'foil-silver': '#c5c8cc' };
+
+function eachProcPoly(geo, state, fn) {
+  const by = regionsByProcess(state, geo);
+  for (const [id, items] of Object.entries(by)) for (const it of items) fn(id, it.poly);
+}
+
+/** Overlay foil colours onto an artwork canvas already transformed to mm space. */
+export function paintFinishColor(ctx, geo, state) {
+  eachProcPoly(geo, state, (id, poly) => {
+    const hex = FOIL_HEX[id]; if (!hex) return;
+    ctx.save(); ctx.fillStyle = hex; ctx.beginPath();
+    poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  });
+}
+
+/** PBR maps (roughness / metalness / bump) in the same frame as the artwork texture. */
+export function renderFinishMaps(geo, state, { ppm = 4, maxPx = 2048 } = {}) {
+  const bb = geo.bboxBleed;
+  ppm = Math.min(ppm, maxPx / Math.max(bb.w, bb.h));
+  const w = Math.max(2, Math.ceil(bb.w * ppm)), h = Math.max(2, Math.ceil(bb.h * ppm));
+  const make = (fill) => {
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d');
+    x.fillStyle = fill; x.fillRect(0, 0, w, h);
+    x.setTransform(ppm, 0, 0, ppm, -bb.x * ppm, -bb.y * ppm);
+    return [c, x];
+  };
+  const lam = state.lamination || 'none';
+  const used = usedProcesses(state);
+  const hasRev = used.some((p) => p.id === 'reverse-uv');
+  const hasUV = used.some((p) => p.id === 'uv');
+  let baseR = lam === 'gloss' ? 40 : lam === 'matte' ? 210 : 120;
+  if (hasRev) baseR = 24; // flood gloss, matte only in reverse-uv regions
+  const [roughCv, rough] = make(`rgb(${baseR},${baseR},${baseR})`);
+  const [metalCv, metal] = make('#000');
+  const [bumpCv, bump] = make('#808080');
+  const fillPolys = (ctx, polys, style) => {
+    ctx.fillStyle = style; ctx.beginPath();
+    for (const poly of polys) { poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); }
+    ctx.fill();
+  };
+  const by = regionsByProcess(state, geo);
+  if (by.uv) fillPolys(rough, by.uv.map((x) => x.poly), '#0a0a0a');
+  if (by['reverse-uv']) fillPolys(rough, by['reverse-uv'].map((x) => x.poly), '#d0d0d0');
+  if (by['foil-gold']) { fillPolys(metal, by['foil-gold'].map((x) => x.poly), '#fff'); fillPolys(rough, by['foil-gold'].map((x) => x.poly), '#3a3a3a'); }
+  if (by['foil-silver']) { fillPolys(metal, by['foil-silver'].map((x) => x.poly), '#fff'); fillPolys(rough, by['foil-silver'].map((x) => x.poly), '#2a2a2a'); }
+  if (by.emboss) fillPolys(bump, by.emboss.map((x) => x.poly), '#d0d0d0');
+  if (by.deboss) fillPolys(bump, by.deboss.map((x) => x.poly), '#404040');
+  if (by.sculpt) fillPolys(bump, by.sculpt.map((x) => x.poly), '#f2f2f2');
+  return { roughness: roughCv, metalness: metalCv, bump: bumpCv, ppm, hasFinish: used.length > 0 || lam !== 'none', hasSculpt: !!by.sculpt, hasUV: hasUV || hasRev || lam === 'gloss' };
+}
+

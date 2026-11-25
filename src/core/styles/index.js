@@ -11,7 +11,7 @@ export const CATEGORIES = [
   { id: 'card', name: '卡类' },
 ];
 const LWH = { L: '长 L', W: '宽 W', H: '高 H' };
-const glueP = { key: 'glue', label: '粘口宽', def: (c) => Math.min(c.t >= 1.2 ? 30 : 14, c.B - 2) };
+const glueP = { key: 'glue', label: '粘口宽', hint: '侧面涂胶水那条边的宽度，一般不用改。', def: (c) => Math.min(c.t >= 1.2 ? 30 : 14, c.B - 2) };
 const tuckStyle = (id, name, en, category, desc, o, extra = {}) => ({
   id, name, en, category, desc, dims: LWH, defaults: { L: 30, W: 25, H: 200 }, params: tuckParams(o),
   build: (c) => buildTuck(c, o), expect: tuckExpect, ...extra,
@@ -29,17 +29,17 @@ export const STYLES = [
   tuckStyle('crash-window', '开窗扣底盒', 'Window Crash-Lock', 'lock', '自动锁底 + 正面开窗。', { top: 'tuck', topOn: 'back', bottom: 'crash', window: true }, { defaults: { L: 70, W: 50, H: 180 } }),
   {
     id: 'lidbase', name: '天地盒（天地盖）', en: 'Lid & Base (Telescope)', category: 'rigid', desc: '底盒 + 盖两件式，盖自动加间隙；盖高可调（全盖/半盖）。', dims: LWH, defaults: { L: 220, W: 120, H: 60 }, material: 'grey2',
-    params: [{ key: 'lidH', label: '盖高', def: (c) => Math.round(clamp(c.H * 0.4, 15, c.H)) }, { key: 'clear', label: '盖与底间隙', def: (c) => (c.t >= 1 ? 1 : 0.5) }],
+    params: [{ key: 'lidH', label: '盖高', hint: '盖子能盖下来的深度。想做成全盖就把这个数改成和高度差不多。', def: (c) => Math.round(clamp(c.H * 0.4, 15, c.H)) }, { key: 'clear', label: '盖与底缝隙', hint: '盖子比底盒多留的缝，太小会盖不进去。', def: (c) => (c.t >= 1 ? 1 : 0.5) }],
     build: O.lidBase, expect: O.lidBaseExpect, view3d: { rx: 90, ry: 180 },
   },
   {
     id: 'book', name: '书型盒（磁吸翻盖）', en: 'Magnetic Book Box', category: 'rigid', desc: '封面 + 书脊 + 封底包内盒，翻盖带磁铁位，高档礼盒常用。', dims: LWH, defaults: { L: 220, W: 120, H: 60 }, material: 'grey2',
-    params: [{ key: 'overhang', label: '封面外伸', def: (c) => (c.t >= 1 ? 2 : 1) }],
+    params: [{ key: 'overhang', label: '封面多出来的边', hint: '封面比内盒每边多出来的宽度，一般不用改。', def: (c) => (c.t >= 1 ? 2 : 1) }],
     build: O.bookBox, expect: O.bookExpect, view3d: { rx: 90, ry: 0 },
   },
   {
     id: 'drawer', name: '抽屉盒（外套 + 内托）', en: 'Sleeve & Tray Drawer', category: 'rigid', desc: '内托沿长度方向抽出，外套为封套结构。', dims: LWH, defaults: { L: 200, W: 80, H: 40 },
-    params: [glueP, { key: 'clear', label: '外套间隙', def: (c) => (c.t >= 1 ? 1 : 0.5) }],
+    params: [glueP, { key: 'clear', label: '外套缝隙', hint: '外套比内托多留的缝，太小会抽不动。', def: (c) => (c.t >= 1 ? 1 : 0.5) }],
     build: O.drawer, expect: O.drawerExpect, view3d: { rx: -90, ry: 0 },
   },
   {
@@ -51,7 +51,7 @@ export const STYLES = [
     params: [glueP], build: O.sleeve, expect: O.sleeveExpect,
   },
   {
-    id: 'mailer', name: '飞机盒', en: 'Mailer Box (FEFCO 0427)', category: 'ship', desc: '电商快递常用，双层侧墙，盖前插舌，无需胶粘。', dims: LWH, defaults: { L: 220, W: 160, H: 60 }, material: 'eflute',
+    id: 'mailer', name: '飞机盒', en: 'Mailer Box', category: 'ship', desc: '电商快递常用，双层侧墙，盖前插舌，不用胶水。', dims: LWH, defaults: { L: 220, W: 160, H: 60 }, material: 'eflute',
     params: [{ key: 'tuck', label: '盖前插舌深', def: (c) => Math.round(Math.min(c.D * 0.7, 40)) }],
     build: O.mailer, expect: O.mailerExpect, view3d: { rx: 90, ry: 180 },
   },

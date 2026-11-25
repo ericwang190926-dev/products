@@ -1,10 +1,10 @@
 // SVG and DXF exporters for the dieline.
-import { FACE_EN, KIND_EN } from '../core/builder.js';
+import { FACE_NAMES, KIND_NAMES } from '../core/builder.js';
 const f = (n) => (Math.round(n * 1000) / 1000).toString();
 const pts = (l) => l.map((p) => `${f(p[0])},${f(p[1])}`).join(' ');
 const ringsD = (rings) => rings.map((r) => 'M' + r.map((p) => `${f(p[0])} ${f(p[1])}`).join(' L') + ' Z').join(' ');
 
-export function buildSVG(geo, { artDataUrl = null } = {}) {
+export function buildSVG(geo, { artDataUrl = null, processLayers = [] } = {}) {
   const bl = geo.bboxBleed, bb = geo.bbox;
   const x0 = Math.min(bl.x, bb.x - 30) - 5, y0 = bl.y - 5, w = bl.x1 + 5 - x0, h = Math.max(bl.y1, bb.y1 + 28) + 5 - y0;
   const L = (id, body) => `<g id="${id}" inkscape:groupmode="layer" inkscape:label="${id}">\n${body}\n</g>`;
@@ -23,7 +23,16 @@ export function buildSVG(geo, { artDataUrl = null } = {}) {
   }
   for (const m of geo.marks) dm += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${f(m.r)}" fill="none" stroke="#333" stroke-width="0.15" stroke-dasharray="0.8 0.8"/>`;
   s += L('Dimensions', dm);
-  s += L('Labels', geo.panels.map((p) => { const t = p.face ? FACE_EN[p.face] : KIND_EN[p.kind]; if (!t) return ''; const xs = p.poly.map((q) => q[0]), ys = p.poly.map((q) => q[1]); const sz = Math.max(1.5, Math.min(6, Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 0.18)); return `<text x="${f((Math.max(...xs) + Math.min(...xs)) / 2)}" y="${f((Math.max(...ys) + Math.min(...ys)) / 2)}" font-size="${f(sz)}" text-anchor="middle" dominant-baseline="middle" fill="#666" font-family="Arial">${t}</text>`; }).join('\n'));
+  let lb = geo.panels.map((p) => { const t = p.face ? FACE_NAMES[p.face] : KIND_NAMES[p.kind]; if (!t) return ''; const xs = p.poly.map((q) => q[0]), ys = p.poly.map((q) => q[1]); const sz = Math.max(1.5, Math.min(6, Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 0.18)); return `<text x="${f((Math.max(...xs) + Math.min(...xs)) / 2)}" y="${f((Math.max(...ys) + Math.min(...ys)) / 2)}" font-size="${f(sz)}" text-anchor="middle" dominant-baseline="middle" fill="#666" font-family='"Noto Sans CJK SC",sans-serif'>${t}</text>`; }).join('\n');
+  for (const sh of geo.sheets || []) if (sh.label) {
+    const xs = sh.poly.map((q) => q[0]), ys = sh.poly.map((q) => q[1]);
+    lb += `<text x="${f((Math.max(...xs)+Math.min(...xs))/2)}" y="${f((Math.max(...ys)+Math.min(...ys))/2)}" font-size="4" text-anchor="middle" dominant-baseline="middle" fill="#666" font-family='"Noto Sans CJK SC",sans-serif'>${sh.label}</text>`;
+  }
+  s += L('Labels', lb);
+  for (const pl of processLayers) {
+    const body = (pl.polys || []).map((r) => `<polygon points="${pts(r)}" fill="${pl.color || '#888'}" fill-opacity="0.25" stroke="${pl.color || '#888'}" stroke-width="0.2"/>`).join('\n');
+    s += L(pl.pdfSpot, body);
+  }
   return s + '\n</svg>\n';
 }
 

@@ -40,11 +40,13 @@ await page.fill('input[data-dim="L"]', '40'); await page.waitForTimeout(800);
 const frontW = await page.evaluate(() => { const g = window.__app.geo; const xs = g.byId.front.poly.map((p) => p[0]); return Math.max(...xs) - Math.min(...xs); });
 ok('editing L updates the dieline (front = L + t)', Math.abs(frontW - 40.5) < 1e-6, `front width ${frontW}`);
 await page.fill('input[data-dim="L"]', '30'); await page.waitForTimeout(800);
-// material change accounts for thickness
-await page.selectOption('#matSel', 'eflute'); await page.waitForTimeout(500);
+// material change accounts for thickness (plain-Chinese structure picker)
+await page.locator('label:has(#struct-corrugated)').click(); await page.waitForTimeout(600);
 const fw2 = await page.evaluate(() => { const g = window.__app.geo; const xs = g.byId.front.poly.map((p) => p[0]); return Math.max(...xs) - Math.min(...xs); });
-ok('E-flute preset (1.5 mm) increases panel size', Math.abs(fw2 - 31.5) < 1e-6, `front width ${fw2}`);
-await page.selectOption('#matSel', 'card350'); await page.waitForTimeout(500);
+ok('细瓦（E楞）1.5 mm increases panel size', Math.abs(fw2 - 31.5) < 1e-6, `front width ${fw2}`);
+await page.locator('label:has(#struct-carton)').click(); await page.waitForTimeout(600);
+const materialCopy = await page.evaluate(() => document.querySelector('#materialSec .summary')?.textContent || '');
+ok('material summary is in plain Chinese with gram weight', /350g/.test(materialCopy) && /白卡|铜版|特种/.test(materialCopy) && /内尺寸/.test(materialCopy), materialCopy);
 
 // image upload + drag on the hanger box
 await page.click('.card[data-id="hanger"]'); await page.waitForTimeout(400);
@@ -64,6 +66,40 @@ await page.fill('.el.on input[type=number][data-k="rot"]', '15'); await page.wai
 await page.fill('#faceColor', '#c8102e').catch(() => {}); await page.evaluate(() => { const i = document.querySelector('#faceColor'); i.value = '#0f4c9c'; i.dispatchEvent(new Event('input', { bubbles: true })); });
 await page.waitForTimeout(600);
 await page.locator('#app').screenshot({ path: `${SHOTS}/app_overview_hanger.png` });
+
+// material UI + finishing processes
+await page.evaluate(() => { window.__app.state.materialTouched = false; });
+await page.click('.card[data-id="lidbase"]'); await page.waitForTimeout(600);
+await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeout(200);
+await page.click('#useDefaults'); await page.waitForTimeout(500);
+ok('lidbase defaults to 灰板裱纸 + 1200g', await page.evaluate(() => {
+  const s = window.__app.state; return s.mat.structure === 'rigid' && s.mat.boardGsm === 1200 && Math.abs(s.t - 1.9) < 0.05 && (document.querySelector('#materialSec .summary')||{}).textContent.includes('1200g灰板');
+}), await page.evaluate(() => window.__app.state.t + ' ' + document.querySelector('#materialSec .summary')?.textContent));
+await page.locator('#props').screenshot({ path: `${SHOTS}/material_ui.png` });
+await page.click('#propTabs button[data-tab="art"]'); await page.waitForTimeout(300);
+await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
+await page.evaluate(() => {
+  const st = window.__app.state;
+  const logo = st.elements.find((e) => e.type === 'image' && e.face === 'front') || st.elements.find((e) => e.type === 'image');
+  if (logo) {
+    st.selected = logo.id;
+    st.finishRegions = [{ id: 'fdemo', type: 'el', elementId: logo.id, processes: ['foil-gold', 'uv'] }];
+    st.lamination = 'matte';
+    st.selectedFinish = 'fdemo';
+  }
+});
+await page.evaluate(() => window.__app.refresh()); await page.waitForTimeout(400);
+await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeout(200);
+await page.evaluate(() => { const el = document.querySelector('.sec h3 .tip') || [...document.querySelectorAll('.sec h3')].find((n) => n.textContent.includes('包装工艺')); el?.closest('.sec')?.scrollIntoView({ block: 'start' }); });
+await page.waitForTimeout(200);
+await page.locator('#props').screenshot({ path: `${SHOTS}/finish_ui.png` });
+await page.click('#propTabs button[data-tab="art"]');
+await setMode('3d'); await setFold(1, 0.55); await page.waitForTimeout(600);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/finish_3d.png` });
+await setMode('split');
+ok('finish processes attach to artwork', await page.evaluate(() => (window.__app.state.finishRegions[0]?.processes || []).includes('foil-gold')));
+await page.click('.card[data-id="hanger"]'); await page.waitForTimeout(400);
+await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(500);
 
 // fold animation
 await page.click('#playFold'); await page.waitForTimeout(1100); const mid = +(await page.inputValue('#fold'));

@@ -2,6 +2,7 @@ import { Matrix4, Vector3 } from 'three';
 import { Builder } from '../builder.js';
 import { rect, flap, profile, roundRect, circlePoly, regularOnEdge, arcPoints, clamp, bbox, add, mul, outward, edgeLen } from '../geom.js';
 import { tube, tray, snapLock, dust, hangHole, glueTaper } from './common.js';
+import { addWrapSheet, trayWrapShape, coverWrapShape } from '../wrap.js';
 
 const bboxOf = (b) => bbox(b.panels.flatMap((p) => p.poly));
 const to3 = (x, y, z = 0) => new Vector3(x, -y, z);
@@ -25,7 +26,17 @@ export function lidBase(c) {
   b.roots[1].openLift = [0, 0, -(Dl + Math.max(20, D * 0.4))];
   b.byId.lidbase.faceRot = 180;
   b.chains([base.base.x - 2 * D + t, base.base.x - D, 0, A, A + D, A + 2 * D - t], 0, [-D, 0, B, B + D], 0);
-  b.note('底盒内尺寸 L×W×H；盖内尺寸 = 底盒外尺寸 + 2×间隙');
+  b.note('底盒按内尺寸（产品放进去的空间）；盒盖会按底盒外面再加一点缝隙自动放大。');
+  if (c.wrap) {
+    const turn = c.turnIn ?? 15;
+    const bbw = bboxOf(b);
+    const x = bbw.x1 + 18;
+    const baseSh = trayWrapShape({ Lo: A + t, Wo: B + t, wall: D, turn });
+    addWrapSheet(b, { id: 'wrapBase', x0: x, y0: 0, shape: baseSh, label: '裱纸（底盒）' });
+    const lidSh = trayWrapShape({ Lo: A2 + t, Wo: B2 + t, wall: Dl, turn });
+    addWrapSheet(b, { id: 'wrapLid', x0: x, y0: baseSh.h + 12, shape: lidSh, label: '裱纸（盒盖）' });
+    b.note(`硬盒裱纸已按板厚和 ${turn}mm 包边自动展开，与灰板刀版分开裁切。`);
+  }
   return b;
 }
 export const lidBaseExpect = (c) => ({ size: [c.A + 2 * c.t + 2 * c.p.clear, c.B + 2 * c.t + 2 * c.p.clear, c.D + c.t] });
@@ -45,7 +56,17 @@ export function bookBox(c) {
   b.mark({ type: 'magnet', x: front.x + 10, y: front.cy, r: 5 });
   b.mark({ type: 'magnet', x: tx + A + D / 2, y: ty + B / 2, r: 5 });
   b.chains([0, Lc, Lc + Hs, 2 * Lc + Hs], Wc, [0, Wc], 0);
-  b.note('书型盒：封面(灰板裱纸)与内盒分开生产，内盒底粘于封底；磁铁位置见虚线圆。精装裱纸需另加 15mm 包边。');
+  b.note('书型盒：封面与内盒分开做，内盒底粘在封底上；虚线圆是磁铁位置。');
+  if (c.wrap) {
+    const turn = c.turnIn ?? 15;
+    const bbw = bboxOf(b);
+    const x = bbw.x1 + 18;
+    const cov = coverWrapShape({ w: 2 * Lc + Hs, h: Wc, turn, spine: { x: Lc, w: Hs } });
+    addWrapSheet(b, { id: 'wrapCover', x0: x, y0: 0, shape: cov, label: '裱纸（封面）' });
+    const traySh = trayWrapShape({ Lo: A + t, Wo: B + t, wall: D, turn });
+    addWrapSheet(b, { id: 'wrapTray', x0: x, y0: cov.h + 12, shape: traySh, label: '裱纸（内盒）' });
+    b.note(`硬盒裱纸已按板厚和 ${turn}mm 包边自动展开，与灰板刀版分开裁切。`);
+  }
   return b;
 }
 export const bookExpect = (c) => { const L = c.A + c.t + 2 * c.p.overhang; return { size: [L, c.B + c.t + 2 * c.p.overhang, c.D + 1.5 * c.t] }; };
@@ -64,7 +85,13 @@ export function drawer(c) {
   b.roots[1].assemble = place(to3(tx + A / 2, ty + B / 2), to3(T.front.cx, T.front.cy, -(Ds - t)), R);
   b.roots[1].openLift = [0, -A * 0.55, 0];
   b.chains([...T.X, T.X[4] + Ds], Ls, [0, Ls], T.X[1]);
-  b.note('抽屉盒：外套(封套)与内托分开；外套内尺寸 = 内托外尺寸 + 间隙。');
+  b.note('抽屉盒：外套和内托分开做；外套会按内托外面再加一点缝隙自动放大。');
+  if (c.wrap) {
+    const turn = c.turnIn ?? 15;
+    const bbw = bboxOf(b);
+    addWrapSheet(b, { id: 'wrapTray', x0: bbw.x1 + 18, y0: 0, shape: trayWrapShape({ Lo: A + t, Wo: B + t, wall: D, turn }), label: '裱纸（内托）' });
+    b.note(`内托裱纸已按板厚和 ${turn}mm 包边自动展开，与灰板刀版分开裁切。`);
+  }
   return b;
 }
 export const drawerExpect = (c) => ({ size: [c.B + 2 * c.t + 2 * c.p.clear, c.A + c.t, c.D + 2 * c.t + c.p.clear] });
@@ -135,7 +162,7 @@ export function mailer(c) {
     const f = flap(se, sd, { ...o, r: 3 }); b.add('lidSide' + k, f.poly, { parent: 'lid', hinge: f.hinge, kind: 'dust', layer: 4 });
   }
   b.chains([-2 * D + t, -D, 0, A, A + D, A + 2 * D - t], 0, [-D - B - tk, -D - B, -D, 0, B, B + D, B + 2 * D - t], 0);
-  b.note('飞机盒(FEFCO 0427 型)：前墙与侧墙双层回折，内前墙卡舌插入底板卡槽。');
+  b.note('飞机盒：前墙和侧墙是双层折进去的，前面的卡舌会插进底板的卡槽，不用涂胶。');
   return b;
 }
 export const mailerExpect = (c) => ({ size: [c.A, c.B, c.D], tol: c.t + 1.6 });

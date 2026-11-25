@@ -1,6 +1,9 @@
 // Interactive SVG view of the dieline + flat artwork.
 import { FACE_NAMES, KIND_NAMES } from '../core/builder.js';
 import { imageCache } from '../render/raster.js';
+import { elementSize, finishRegionsOf, regionPoly, flatToFaceLocal, faceAtPoint } from '../core/finish.js';
+import { PROCESS_MAP } from '../core/materials.js';
+export { elementSize };
 
 const f = (n) => (Math.round(n * 100) / 100).toString();
 const ringsD = (rings) => rings.map((r) => 'M' + r.map((p) => `${f(p[0])} ${f(p[1])}`).join('L') + 'Z').join('');
@@ -16,12 +19,6 @@ export function displayUrl(src) {
     u = URL.createObjectURL(new Blob([arr], { type: mime })); blobUrls.set(src, u);
   }
   return u;
-}
-
-export function elementSize(el) {
-  if (el.type === 'image') { const im = imageCache.get(el.src); const r = im && im.naturalWidth ? im.naturalHeight / im.naturalWidth : el.ratio || 1; return [el.w, el.w * r]; }
-  const lines = String(el.text || '').split('\n'); const longest = Math.max(...lines.map((l) => [...l].reduce((s, ch) => s + (ch.charCodeAt(0) > 255 ? 1 : 0.58), 0)));
-  return [Math.max(4, longest * el.size), lines.length * el.size * 1.25];
 }
 
 export function createView2D(svg, hooks) {
@@ -56,11 +53,27 @@ export function createView2D(svg, hooks) {
     }
     o += `</g>`;
     o += `<g id="lyr-glue" ${L.glue ? '' : 'display="none"'}>${geo.glue.map((g2) => `<path d="${ringsD([g2])}" fill="url(#hatch)" pointer-events="none"/>`).join('')}</g>`;
+    if (L.finish !== false) {
+      o += `<g id="lyr-finish" pointer-events="none">`;
+      for (const r of finishRegionsOf(s)) {
+        const poly = regionPoly(geo, r); if (!poly) continue;
+        const d = ringsD([poly]);
+        for (const id of r.processes) {
+          const pr = PROCESS_MAP[id]; if (!pr) continue;
+          o += `<path d="${d}" fill="${pr.color}" fill-opacity="0.28" stroke="${pr.color}" stroke-width="0.9" vector-effect="non-scaling-stroke"/>`;
+        }
+        if (r.id && r.id === s.selectedFinish) o += `<path d="${d}" fill="none" stroke="#111" stroke-width="1.2" stroke-dasharray="3 2" vector-effect="non-scaling-stroke"/>`;
+      }
+      o += `</g>`;
+    }
     o += `<g pointer-events="none" fill="none" stroke-linejoin="round">`;
     if (L.bleed) o += `<path d="${ringsD(geo.bleedRegion)}" stroke="#2b7bd6" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="3 3"/>`;
     if (L.crease) o += `<path d="${geo.crease.map(polyline).join('')}" stroke="#11a04a" stroke-width="1.3" vector-effect="non-scaling-stroke" stroke-dasharray="7 4"/>`;
     if (L.cut) { o += `<path d="${geo.cut.map(polyline).join('')}" stroke="#e0262b" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`; if (geo.perf.length) o += `<path d="${geo.perf.map(polyline).join('')}" stroke="#e0262b" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-dasharray="2 2"/>`; }
-    for (const m of geo.marks) o += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${m.r}" stroke="#7c3aed" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="3 2"/><text x="${f(m.x)}" y="${f(m.y + m.r + 3.5)}" font-size="3" fill="#7c3aed" stroke="none" text-anchor="middle">磁铁</text>`;
+    for (const m of geo.marks) {
+      if (m.type === 'label') { o += `<text x="${f(m.x)}" y="${f(m.y)}" font-size="3.6" fill="#6b7280" stroke="none" text-anchor="middle" dominant-baseline="central">${escX(m.text || '')}</text>`; continue; }
+      o += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${m.r}" stroke="#7c3aed" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="3 2"/><text x="${f(m.x)}" y="${f(m.y + m.r + 3.5)}" font-size="3" fill="#7c3aed" stroke="none" text-anchor="middle">磁铁</text>`;
+    }
     o += `</g>`;
     if (L.labels) {
       o += `<g pointer-events="none" fill="#5b6170" text-anchor="middle" dominant-baseline="central" font-family='"Noto Sans CJK SC",sans-serif'>`;
@@ -106,7 +119,15 @@ export function createView2D(svg, hooks) {
   svg.addEventListener('pointerdown', (e) => {
     const elNode = e.target.closest('[data-el]');
     const start = toMM(e);
-    if (elNode && state.layers.art) {
+    if (state.drawFinish) {
+      const fc = faceAtPoint(geo, start[0], start[1]) || (state.selectedFace && geo.faces.find((q) => q.id === state.selectedFace));
+      if (!fc) { drag = { type: 'pan', sx: e.clientX, sy: e.clientY, vb0: { ...vb }, face: null, moved: false }; }
+      else {
+        const loc = flatToFaceLocal(fc, start[0], start[1]);
+        drag = { type: 'finish', fc, start, loc, moved: false };
+        hooks.select?.(null, fc.id);
+      }
+    } else if (elNode && state.layers.art) {
       const id = elNode.getAttribute('data-el'); const el = state.elements.find((q) => q.id === id);
       hooks.select(id, el.face);
       drag = { type: 'el', el, start, x0: el.x, y0: el.y, moved: false };
@@ -123,6 +144,21 @@ export function createView2D(svg, hooks) {
       if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 3) drag.moved = true;
       vb = { ...drag.vb0, x: drag.vb0.x - dx, y: drag.vb0.y - dy }; applyVB(); return;
     }
+    if (drag.type === 'finish') {
+      const p = toMM(e); const loc = flatToFaceLocal(drag.fc, p[0], p[1]);
+      if (Math.hypot(p[0] - drag.start[0], p[1] - drag.start[1]) > 0.8) drag.moved = true;
+      drag.loc2 = loc;
+      let prev = svg.querySelector('#finishPreview'); if (prev) prev.remove();
+      const x = (drag.loc[0] + loc[0]) / 2, y = (drag.loc[1] + loc[1]) / 2;
+      const w = Math.abs(loc[0] - drag.loc[0]), h = Math.abs(loc[1] - drag.loc[1]);
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      g.id = 'finishPreview';
+      g.setAttribute('transform', `translate(${f(drag.fc.cx)} ${f(drag.fc.cy)}) rotate(${drag.fc.rot}) translate(${f(x)} ${f(y)})`);
+      g.setAttribute('x', f(-w / 2)); g.setAttribute('y', f(-h / 2)); g.setAttribute('width', f(w)); g.setAttribute('height', f(h));
+      g.setAttribute('fill', 'rgba(201,162,39,0.2)'); g.setAttribute('stroke', '#c9a227'); g.setAttribute('stroke-width', '1.2'); g.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(g);
+      return;
+    }
     const p = toMM(e); const dx = p[0] - drag.start[0], dy = p[1] - drag.start[1];
     const fc = geo.faces.find((q) => q.id === drag.el.face); const a = (-fc.rot * Math.PI) / 180;
     drag.el.x = drag.x0 + dx * Math.cos(a) - dy * Math.sin(a); drag.el.y = drag.y0 + dx * Math.sin(a) + dy * Math.cos(a); drag.moved = true;
@@ -134,6 +170,14 @@ export function createView2D(svg, hooks) {
     if (!drag) return;
     if (drag.type === 'el' && drag.moved) hooks.changed();
     if (drag.type === 'pan' && !drag.moved) hooks.select(null, drag.face || null);
+    if (drag.type === 'finish') {
+      const prev = svg.querySelector('#finishPreview'); if (prev) prev.remove();
+      if (drag.moved && drag.loc2) {
+        const x = (drag.loc[0] + drag.loc2[0]) / 2, y = (drag.loc[1] + drag.loc2[1]) / 2;
+        const w = Math.abs(drag.loc2[0] - drag.loc[0]), h = Math.abs(drag.loc2[1] - drag.loc[1]);
+        if (w > 1 && h > 1) hooks.finishRect?.(drag.fc.id, x, y, w, h);
+      }
+    }
     drag = null;
   };
   svg.addEventListener('pointerup', end); svg.addEventListener('pointercancel', end);

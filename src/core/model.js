@@ -2,8 +2,8 @@ import { STYLE_MAP } from './styles/index.js';
 import { finalize } from './builder.js';
 
 /** Resolve context (mid-plane panel sizes + params with smart defaults) for a style. */
-export function makeContext(style, { L, W, H, t, params = {} }) {
-  const c = { L, W: style.dims.W ? W : L, H, t, A: L + t, B: (style.dims.W ? W : L) + t, D: H + t, p: {} };
+export function makeContext(style, { L, W, H, t, params = {}, wrap = false, turnIn = 15, faceT = 0 } = {}) {
+  const c = { L, W: style.dims.W ? W : L, H, t, A: L + t, B: (style.dims.W ? W : L) + t, D: H + t, p: {}, wrap: !!wrap, turnIn: turnIn ?? 15, faceT: faceT || 0 };
   for (const pd of style.params) {
     const v = params[pd.key];
     c.p[pd.key] = v === undefined || v === null || v === '' || Number.isNaN(v) ? pd.def(c) : v;

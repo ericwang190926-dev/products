@@ -3,12 +3,12 @@ import { rect, flap, roundRect, clamp } from '../geom.js';
 import { tube, tuckLid, dust, sealEnd, snapLock, crashLock, notchedTop, hangHole } from './common.js';
 
 export const tuckParams = (o = {}) => [
-  { key: 'glue', label: '粘口宽', def: (c) => Math.min(c.t >= 1.2 ? 30 : 14, c.B - 2) },
-  ...(o.top === 'tuck' || o.bottom === 'tuck' ? [{ key: 'tuck', label: '插舌深', def: (c) => clamp(c.B * 0.45, 10, Math.min(25, c.D * 0.5)) }] : []),
-  ...(o.top === 'tuck' || o.bottom === 'tuck' ? [{ key: 'dust', label: '防尘翼深', def: (c) => Math.min(c.A * 0.45, Math.max(c.B * 0.6, 10)) }] : []),
-  ...(o.top === 'tuck' && o.topOn !== 'front' ? [{ key: 'thumb', label: '拇指位缺口', type: 'bool', def: () => true }] : []),
-  ...(o.header ? [{ key: 'headerH', label: '挂头高度', def: (c) => clamp(c.A * 0.6, 25, 45) }, { key: 'headerDouble', label: '双层挂头(回折)', type: 'bool', def: () => true }] : []),
-  ...(o.window ? [{ key: 'winW', label: '开窗宽', def: (c) => Math.round(c.A * 0.6) }, { key: 'winH', label: '开窗高', def: (c) => Math.round(c.D * 0.5) }, { key: 'winY', label: '开窗上下偏移', def: () => 0 }] : []),
+  { key: 'glue', label: '粘口宽', hint: '侧面涂胶水那条边的宽度，一般不用改。', def: (c) => Math.min(c.t >= 1.2 ? 30 : 14, c.B - 2) },
+  ...(o.top === 'tuck' || o.bottom === 'tuck' ? [{ key: 'tuck', label: '插舌长度', hint: '盖子插进盒子的那一截有多长，一般不用改。', def: (c) => clamp(c.B * 0.45, 10, Math.min(25, c.D * 0.5)) }] : []),
+  ...(o.top === 'tuck' || o.bottom === 'tuck' ? [{ key: 'dust', label: '两侧小翼长度', hint: '盖子两边挡住缝隙的小翼，一般不用改。', def: (c) => Math.min(c.A * 0.45, Math.max(c.B * 0.6, 10)) }] : []),
+  ...(o.top === 'tuck' && o.topOn !== 'front' ? [{ key: 'thumb', label: '拇指缺口', hint: '前面开一个小缺口，方便揭开盖子。', type: 'bool', def: () => true }] : []),
+  ...(o.header ? [{ key: 'headerH', label: '挂头高度', hint: '盒子上方用来挂货架的那一块有多高。', def: (c) => clamp(c.A * 0.6, 25, 45) }, { key: 'headerDouble', label: '双层挂头', hint: '挂头向内折一层，更结实。', type: 'bool', def: () => true }] : []),
+  ...(o.window ? [{ key: 'winW', label: '开窗宽', def: (c) => Math.round(c.A * 0.6) }, { key: 'winH', label: '开窗高', def: (c) => Math.round(c.D * 0.5) }, { key: 'winY', label: '开窗上下位置', hint: '正数为往上移，负数为往下移。', def: () => 0 }] : []),
 ];
 
 /** Generic tuck-end / seal-end / lock-bottom carton. */
