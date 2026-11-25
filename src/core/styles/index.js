@@ -28,13 +28,23 @@ export const STYLES = [
   tuckStyle('crash-hanger', '挂钩扣底盒', 'Hanger Crash-Lock', 'lock', '自动锁底 + 挂头，适合电动牙刷整机挂卖。', { top: 'tuck', topOn: 'front', bottom: 'crash', header: true }, { defaults: { L: 60, W: 45, H: 230 } }),
   tuckStyle('crash-window', '开窗扣底盒', 'Window Crash-Lock', 'lock', '自动锁底 + 正面开窗。', { top: 'tuck', topOn: 'back', bottom: 'crash', window: true }, { defaults: { L: 70, W: 50, H: 180 } }),
   {
-    id: 'lidbase', name: '天地盒（天地盖）', en: 'Lid & Base (Telescope)', category: 'rigid', desc: '底盒 + 盖两件式，盖自动加间隙；盖高可调（全盖/半盖）。', dims: LWH, defaults: { L: 220, W: 120, H: 60 }, material: 'grey2',
-    params: [{ key: 'lidH', label: '盖高', hint: '盖子能盖下来的深度。想做成全盖就把这个数改成和高度差不多。', def: (c) => Math.round(clamp(c.H * 0.4, 15, c.H)) }, { key: 'clear', label: '盖与底缝隙', hint: '盖子比底盒多留的缝，太小会盖不进去。', def: (c) => (c.t >= 1 ? 1 : 0.5) }],
+    id: 'lidbase', name: '天地盒（天地盖）', en: 'Lid & Base (Telescope)', category: 'rigid', desc: '底盒 + 盖两件式。可选鞋盒式半盖，或天盖盖到底的全盖。', dims: LWH, defaults: { L: 220, W: 120, H: 60 }, material: 'grey2',
+    params: [
+      { key: 'lidType', label: '盖型', type: 'choice', def: () => 'half' },
+      { key: 'lidH', label: '盖高', hint: '半盖时，盖子能盖下来的深度。一般是整盒高度的三分之一左右。', def: (c) => Math.round(clamp((c.user?.H ?? c.outer?.H ?? (c.H + 2 * c.t)) / 3, 15, c.D)) },
+      { key: 'clear', label: '盖与底缝隙', hint: '盖子比底盒多留的缝，太小会盖不进去。', def: (c) => (c.t >= 1 ? 1 : 0.5) },
+    ],
     build: O.lidBase, expect: O.lidBaseExpect, view3d: { rx: 90, ry: 180 },
   },
   {
-    id: 'book', name: '书型盒（磁吸翻盖）', en: 'Magnetic Book Box', category: 'rigid', desc: '封面 + 书脊 + 封底包内盒，翻盖带磁铁位，高档礼盒常用。', dims: LWH, defaults: { L: 220, W: 120, H: 60 }, material: 'grey2',
-    params: [{ key: 'overhang', label: '封面多出来的边', hint: '封面比内盒每边多出来的宽度，一般不用改。', def: (c) => (c.t >= 1 ? 2 : 1) }],
+    id: 'book', name: '书型盒（磁吸翻盖）', en: 'Magnetic Book Box', category: 'rigid', desc: '封面 + 书脊 + 封底包内盒，开盒那边有包边，左右各一颗磁铁。', dims: LWH, defaults: { L: 220, W: 120, H: 60 }, material: 'grey2',
+    params: [
+      { key: 'flapH', label: '包边高度', hint: '开盒那边折下来、盖住内盒前墙的那条边的宽度。一般是盒子高度的一半左右。', def: (c) => Math.round(clamp(c.H * 0.5, 18, c.H)) },
+      { key: 'overhang', label: '封面多出来的边', hint: '封面比内盒每边多出来的宽度，一般不用改。', def: (c) => (c.t >= 1 ? 2 : 1) },
+      { key: 'magnetD', label: '磁铁直径', hint: '埋在包边和内盒前墙里的磁铁大小，常用 10 或 12mm。', def: () => 12 },
+      { key: 'magnetInset', label: '磁铁边距', hint: '磁铁中心离包边左右两边的距离，一般 15–20mm。', def: () => 18 },
+      { key: 'flapGap', label: '包边铰缝', hint: '包边灰板和封面灰板之间的缝，按板厚自动留，一般不用改。', def: (c) => Math.round(1.5 * c.t * 10) / 10 },
+    ],
     build: O.bookBox, expect: O.bookExpect, view3d: { rx: 90, ry: 0 },
   },
   {

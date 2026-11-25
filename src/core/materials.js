@@ -73,6 +73,7 @@ export const LAMINATION = [
   { id: 'none', name: '不覆膜', hint: '印刷完不再贴保护膜。' },
   { id: 'gloss', name: '光膜', hint: '整面贴一层亮膜，颜色更鲜亮，也更好擦。' },
   { id: 'matte', name: '哑膜', hint: '整面贴一层雾面膜，不反光，手感更高级。' },
+  { id: 'softtouch', name: '触感膜', hint: '整面贴一层触感膜，摸起来细腻柔滑，几乎不反光。' },
 ];
 
 /** Local finishing processes. pdfSpot is the English separation name suppliers expect. */
@@ -186,7 +187,7 @@ export function kindName(mat) {
 export function materialSummary(mat, t) {
   const { t: tt, faceT, overridden } = t != null ? { t, faceT: mat.structure === 'rigid' ? faceThickness(mat) : 0, overridden: mat.tOverride != null } : resolvedThickness(mat);
   const thick = `板厚约${tt.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}mm${overridden ? '（已手动指定）' : ''}`;
-  const auto = '尺寸按内尺寸（产品放进去的空间）自动加放';
+  const auto = '按外尺寸填写，内尺寸已按板厚自动算出';
   if (mat.structure === 'rigid') {
     return `用料：${mat.boardGsm}g灰板 + ${mat.faceGsm}g${kindName(mat)}裱面，${thick}，${auto}`;
   }
@@ -218,16 +219,30 @@ export function finishSummary(lamination, regions) {
   return parts.length ? `工艺：${parts.join('、')}` : '工艺：无特殊表面工艺';
 }
 
-/** Quote-sheet lines in plain Chinese (also used on the PDF title block). */
-export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBleed, lamination, finishRegions, outer }) {
+function fmtQuoteDims(style, obj) {
   const dkeys = ['L', 'W', 'H'].filter((k) => style.dims[k]);
-  const inner = dkeys.map((k) => `${style.dims[k].replace(/\s*[A-Z]\s*$/, '').trim() || k} ${dims[k]}`).join(' × ') + ' mm';
-  const outerStr = outer ? `外尺寸约 ${outer.map((n) => n.toFixed(1)).join(' × ')} mm` : '';
+  const val = (k) => {
+    const n = obj?.[k];
+    if (n == null) return '';
+    const s = (+n).toFixed(1).replace(/\.0$/, '');
+    return s;
+  };
+  const lab = (k) => style.dims[k].replace(/\s*[A-Z]\s*$/, '').trim() || k;
+  return dkeys.map((k) => `${lab(k)} ${val(k)}`).join(' × ') + ' mm';
+}
+
+/** Quote-sheet lines in plain Chinese (also used on the PDF title block). */
+export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBleed, lamination, finishRegions, outer, inner, lidType }) {
+  const outerObj = outer && !Array.isArray(outer) ? outer : (Array.isArray(outer) ? { L: outer[0], W: outer[1], H: outer[2] } : null);
+  const innerObj = inner || dims;
   const lines = [
     `盒型：${style.name}（${style.en}）`,
-    `内尺寸（产品放进去的尺寸）：${inner}`,
   ];
-  if (outerStr) lines.push(outerStr);
+  if (style.id === 'lidbase') {
+    lines.push(`盖型：${lidType === 'full' ? '全盖（天盖盖到底）' : '鞋盒式半盖'}`);
+  }
+  if (outerObj) lines.push(`外尺寸（外面量到的尺寸）：${fmtQuoteDims(style, outerObj)}`);
+  if (innerObj) lines.push(`内尺寸（里面能放的产品）：${fmtQuoteDims(style, innerObj)}`);
   lines.push(materialSummary(mat, t));
   if (mat.structure === 'rigid') {
     lines.push(`裱纸包边 ${mat.turnIn ?? 15} mm，面纸厚约${(faceT ?? faceThickness(mat)).toFixed(2)}mm`);
@@ -268,4 +283,4 @@ export function materialFromLegacy(materialId, t) {
   return base;
 }
 
-export const ADVANCED_PARAMS = new Set(['glue', 'clear', 'overhang', 'tuck', 'arc']);
+export const ADVANCED_PARAMS = new Set(['glue', 'clear', 'overhang', 'tuck', 'arc', 'magnetD', 'magnetInset', 'flapGap']);

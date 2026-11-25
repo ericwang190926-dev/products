@@ -38,12 +38,12 @@ ok('all styles selectable in UI', allOk.bad.length === 0, `${allOk.n} styles${al
 await page.click('.card[data-id="ste"]'); await page.waitForTimeout(300);
 await page.fill('input[data-dim="L"]', '40'); await page.waitForTimeout(800);
 const frontW = await page.evaluate(() => { const g = window.__app.geo; const xs = g.byId.front.poly.map((p) => p[0]); return Math.max(...xs) - Math.min(...xs); });
-ok('editing L updates the dieline (front = L + t)', Math.abs(frontW - 40.5) < 1e-6, `front width ${frontW}`);
+ok('editing L updates the dieline (front = 外尺寸 - t)', Math.abs(frontW - 39.5) < 1e-6, `front width ${frontW}`);
 await page.fill('input[data-dim="L"]', '30'); await page.waitForTimeout(800);
 // material change accounts for thickness (plain-Chinese structure picker)
 await page.locator('label:has(#struct-corrugated)').click(); await page.waitForTimeout(600);
 const fw2 = await page.evaluate(() => { const g = window.__app.geo; const xs = g.byId.front.poly.map((p) => p[0]); return Math.max(...xs) - Math.min(...xs); });
-ok('细瓦（E楞）1.5 mm increases panel size', Math.abs(fw2 - 31.5) < 1e-6, `front width ${fw2}`);
+ok('细瓦（E楞）按外尺寸会减小内面板（板更厚）', Math.abs(fw2 - 28.5) < 1e-6, `front width ${fw2}`);
 await page.locator('label:has(#struct-carton)').click(); await page.waitForTimeout(600);
 const materialCopy = await page.evaluate(() => document.querySelector('#materialSec .summary')?.textContent || '');
 ok('material summary is in plain Chinese with gram weight', /350g/.test(materialCopy) && /白卡|铜版|特种/.test(materialCopy) && /内尺寸/.test(materialCopy), materialCopy);
@@ -99,6 +99,46 @@ await setMode('3d'); await setFold(1, 0.12); await page.waitForTimeout(600);
 await page.locator('#v3d').screenshot({ path: `${SHOTS}/finish_3d.png` });
 await setMode('split');
 ok('finish processes attach to artwork', await page.evaluate(() => { const regs = window.__app.state.finishRegions || []; return regs.some((r) => (r.processes || []).includes('foil-gold')) && regs.some((r) => (r.processes || []).includes('uv')); }));
+
+// 天地盒 半盖 / 全盖 + 书型盒包边磁铁
+await page.evaluate(() => { window.__app.state.materialTouched = false; window.__app.state.dimsTouched = false; window.__app.state.dimMode = 'outer'; window.__app.state.params = {}; });
+await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeout(200);
+await page.click('.card[data-id="lidbase"]'); await page.waitForTimeout(500);
+await page.click('#useDefaults'); await page.waitForTimeout(500);
+await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
+await setMode('3d'); await setFold(1, 0.2); await page.waitForTimeout(500);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/lidbase_half_3d.png` });
+ok('天地盒 半盖 lid is shorter than the base', await page.evaluate(() => {
+  const g = window.__app.geo; const lid = g.byId.lidfront, base = g.byId.front;
+  const h = (id) => { const ys = g.byId[id].poly.map((p) => p[1]); return Math.max(...ys) - Math.min(...ys); };
+  return h('lidfront') < h('front') && g.ctx.p.lidType !== 'full';
+}));
+await page.click('#propTabs button[data-tab="struct"]');
+await page.locator('label:has(input[name="lidType"][value="full"])').click();
+await page.waitForTimeout(700);
+await setMode('3d'); await setFold(1, 0.22); await page.waitForTimeout(500);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/lidbase_full_3d.png` });
+ok('天地盒 全盖 lid reaches the bottom', await page.evaluate(() => {
+  const g = window.__app.geo;
+  const h = (id) => { const ys = g.byId[id].poly.map((p) => p[1]); return Math.max(...ys) - Math.min(...ys); };
+  return g.ctx.p.lidType === 'full' && h('lidfront') > h('front') + 1;
+}));
+
+await page.evaluate(() => { window.__app.state.params = {}; window.__app.state.dimsTouched = false; });
+await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeout(200);
+await page.click('.card[data-id="book"]'); await page.waitForTimeout(500);
+await page.click('#useDefaults'); await page.waitForTimeout(500);
+await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
+await setMode('2d'); await page.waitForTimeout(400);
+await page.locator('#v2d').screenshot({ path: `${SHOTS}/book_magnet_dieline.png` });
+await setMode('3d'); await setFold(1, 0.12); await page.waitForTimeout(600);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_magnet_3d.png` });
+ok('书型盒 has 包边 and 4 magnet marks', await page.evaluate(() => {
+  const g = window.__app.geo;
+  return !!(g.byId.flap && g.marks.filter((m) => m.type === 'magnet').length === 4);
+}));
+ok('覆膜 options include 触感膜', await page.evaluate(() => /触感膜/.test(document.body.innerText)));
+
 await page.click('.card[data-id="hanger"]'); await page.waitForTimeout(400);
 await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(500);
 

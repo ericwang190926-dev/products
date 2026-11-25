@@ -58,7 +58,7 @@ export function trayWrapShape({ Lo, Wo, wall, turn = 15, gap = 1.5 }) {
 }
 
 /** Rectangular wrap for a flat cover (书型盒封面+书脊+封底), with 15 mm turn-in and 45° corners. */
-export function coverWrapShape({ w, h, turn = 15, spine }) {
+export function coverWrapShape({ w, h, turn = 15, spine, bands: bandsArg } = {}) {
   const T = turn, W = w + 2 * T, H = h + 2 * T;
   const poly = [
     [T, 0], [W - T, 0], [W, T], [W, H - T], [W - T, H], [T, H], [0, H - T], [0, T],
@@ -69,8 +69,10 @@ export function coverWrapShape({ w, h, turn = 15, spine }) {
     [[T + w, T + h], [T, T + h]],
     [[T, T + h], [T, T]],
   ];
-  if (spine && spine.w > 0) {
-    const x0 = T + spine.x, x1 = T + spine.x + spine.w;
+  const bands = [...(bandsArg || []), ...(spine && spine.w > 0 ? [spine] : [])];
+  for (const band of bands) {
+    if (!band || !(band.w > 0)) continue;
+    const x0 = T + band.x, x1 = T + band.x + band.w;
     creases.push([[x0, T], [x0, T + h]], [[x1, T], [x1, T + h]]);
   }
   return { poly, creases, w: W, h: H, cx: T + w / 2, cy: T + h / 2 };

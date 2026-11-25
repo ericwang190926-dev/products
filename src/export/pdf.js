@@ -55,13 +55,23 @@ export function buildPDF(geo, { art = null, info = [], processLayers = [] } = {}
   {
     let s = 'q 0 0 0 1 K 0 0 0 1 k 0.3 w\n';
     for (const m of geo.marks) {
-      if (m.type === 'label' && m.text) { s += txt(m.x, m.y, 8, m.text, 'center'); continue; }
-      const n = 24; const pts = []; for (let i = 0; i < n; i++) pts.push([m.x + m.r * Math.cos((i / n) * 6.283), m.y + m.r * Math.sin((i / n) * 6.283)]);
-      s += `[1 1] 0 d ${path(pts, true)} S [] 0 d\n`;
-      s += txt(m.x, m.y + m.r + 3, 6, m.text || '磁铁', 'center');
+      if (m.type === 'label' && m.text) s += txt(m.x, m.y, 8, m.text, 'center');
     }
     for (const d of geo.dims) s += dimOps(d);
     out.push(`/OC /ocDims BDC\n${s}Q\nEMC`);
+  }
+  {
+    const magnets = (geo.marks || []).filter((m) => m.type === 'magnet');
+    if (magnets.length) {
+      let s = 'q 0.45 0.7 0 0.1 K 0.35 w\n';
+      for (const m of magnets) {
+        const n = 24; const pts = []; for (let i = 0; i < n; i++) pts.push([m.x + m.r * Math.cos((i / n) * 6.283), m.y + m.r * Math.sin((i / n) * 6.283)]);
+        s += `[1 1] 0 d ${path(pts, true)} S [] 0 d\n`;
+        s += txt(m.x, m.y + m.r + 3, 6, m.text || '磁铁', 'center');
+      }
+      s += txt(magnets[0].x, magnets[0].y - magnets[0].r - 5, 7, `磁铁位置 ×${magnets.length}`, 'center');
+      out.push(`/OC /ocMagnet BDC\n${s}Q\nEMC`);
+    }
   }
   {
     let s = 'q 0 0 0 0.6 k\n';
@@ -117,6 +127,7 @@ export function buildPDF(geo, { art = null, info = [], processLayers = [] } = {}
 
   const content = out.join('\n');
   const baseLayers = [['ocArt', 'Artwork'], ['ocGlue', 'Glue'], ['ocBleed', 'Bleed'], ['ocCrease', 'Crease'], ['ocCut', 'Cut'], ['ocDims', 'Dimensions'], ['ocLabels', 'Labels'], ['ocInfo', 'Info']];
+  if ((geo.marks || []).some((m) => m.type === 'magnet')) baseLayers.push(['ocMagnet', '磁铁位置']);
   const procLayerDefs = processLayers.map((pl) => ['oc' + pl.pdfSpot, pl.pdfSpot]);
   const layers = [...baseLayers, ...procLayerDefs];
   const objs = [];
@@ -130,7 +141,13 @@ export function buildPDF(geo, { art = null, info = [], processLayers = [] } = {}
     const [c, m, y, k] = pl.cmyk;
     return add(`[/Separation /${pl.pdfSpot} /DeviceCMYK << /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [${c} ${m} ${y} ${k}] /N 1 >>]`);
   });
-  const ocIds = layers.map(([, name]) => add(`<< /Type /OCG /Name (${name}) >>`));
+  const ocName = (name) => {
+    if (!/[^\x20-\x7e]/.test(name)) return `(${name})`;
+    const bytes = [0xfe, 0xff];
+    for (const ch of name) { const c = ch.codePointAt(0); bytes.push((c >> 8) & 0xff, c & 0xff); }
+    return '<' + bytes.map((b) => b.toString(16).padStart(2, '0')).join('') + '>';
+  };
+  const ocIds = layers.map(([, name]) => add(`<< /Type /OCG /Name ${ocName(name)} >>`));
   const contentId = add({ dict: `<< /Length ${new TextEncoder().encode(content).length} >>`, bin: new TextEncoder().encode(content) });
   const ocRefs = ocIds.map((i) => `${i} 0 R`).join(' ');
   const procCS = csProc.map((id, i) => `/CSProc${i} ${id} 0 R`).join(' ');

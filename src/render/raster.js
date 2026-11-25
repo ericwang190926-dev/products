@@ -145,7 +145,7 @@ export function renderFinishMaps(geo, state, { ppm = 4, maxPx = 2048 } = {}) {
   const used = usedProcesses(state);
   const hasRev = used.some((p) => p.id === 'reverse-uv');
   const hasUV = used.some((p) => p.id === 'uv');
-  let baseR = lam === 'gloss' ? 40 : lam === 'matte' ? 210 : 120;
+  let baseR = lam === 'gloss' ? 40 : lam === 'matte' ? 210 : lam === 'softtouch' ? 245 : 120;
   if (hasRev) baseR = 24; // flood gloss, matte only in reverse-uv regions
   const [roughCv, rough] = make(`rgb(${baseR},${baseR},${baseR})`);
   const [metalCv, metal] = make('#000');

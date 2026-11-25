@@ -45,7 +45,11 @@ export function createView3D(container) {
   function bulgeGeometry(p, bb) {
     const pb = bbox(p.poly); const g = new THREE.PlaneGeometry(pb.w, pb.h, 48, 64); g.translate(pb.x + pb.w / 2, -(pb.y + pb.h / 2), 0);
     const pos = g.attributes.position;
-    for (let i = 0; i < pos.count; i++) { const u = (pos.getX(i) - pb.x) / pb.w, v = (-pos.getY(i) - pb.y) / pb.h; pos.setZ(i, p.bulge * Math.sin(Math.PI * u) * Math.pow(Math.sin(Math.PI * v), 0.35)); }
+    for (let i = 0; i < pos.count; i++) {
+      const u = Math.min(1, Math.max(0, (pos.getX(i) - pb.x) / (pb.w || 1)));
+      const v = Math.min(1, Math.max(0, (-pos.getY(i) - pb.y) / (pb.h || 1)));
+      pos.setZ(i, p.bulge * Math.sin(Math.PI * u) * Math.pow(Math.max(0, Math.sin(Math.PI * v)), 0.35));
+    }
     g.computeVertexNormals(); uvFor(g, bb); return g;
   }
 
@@ -71,6 +75,25 @@ export function createView3D(container) {
       if (e.type === 'film') m = new THREE.Mesh(new THREE.ShapeGeometry(shapeOf(e.poly)), new THREE.MeshStandardMaterial({ color: 0xdfefff, transparent: true, opacity: 0.22, roughness: 0.05, side: THREE.DoubleSide, depthWrite: false }));
       if (e.type === 'blister') { const eg = new THREE.ExtrudeGeometry(shapeOf(e.poly), { depth: e.depth, bevelEnabled: true, bevelThickness: Math.min(4, e.depth * 0.3), bevelSize: 2, bevelSegments: 4 }); m = new THREE.Mesh(eg, new THREE.MeshPhysicalMaterial({ color: 0xf2f8ff, transparent: true, opacity: 0.28, roughness: 0.08, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false })); }
       if (!m) continue; m.matrixAutoUpdate = false; m.userData = { panel: p, extra: e }; m.renderOrder = 2; root.add(m); meshes.push(m);
+    }
+    const magMat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+    const pointIn = (poly, x, y) => {
+      let n = 0; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const yi = poly[i][1], yj = poly[j][1], xi = poly[i][0], xj = poly[j][0];
+        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi) n++;
+      }
+      return n % 2 === 1;
+    };
+    for (const mk of geo.marks || []) {
+      if (mk.type !== 'magnet') continue;
+      const panel = (mk.panel && geo.byId[mk.panel]) || geo.panels.find((p) => p.poly && pointIn(p.poly, mk.x, mk.y));
+      if (!panel) continue;
+      const g = new THREE.RingGeometry(Math.max(0.4, mk.r * 0.65), mk.r, 28);
+      const mesh = new THREE.Mesh(g, magMat);
+      mesh.matrixAutoUpdate = false;
+      mesh.userData = { panel, extra: { type: 'magnet', x: mk.x, y: mk.y } };
+      mesh.renderOrder = 3;
+      root.add(mesh); meshes.push(mesh);
     }
     const v = geo.view3d; viewM = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler((v.rx * Math.PI) / 180, (v.ry * Math.PI) / 180, 0, 'YXZ'));
     // reference size from the folded state
@@ -108,6 +131,8 @@ export function createView3D(container) {
           mat.clearcoatMap = asTex(maps.clearcoat); mat.clearcoat = 1; mat.clearcoatRoughness = 0.1;
         } else if (lam === 'gloss') {
           mat.clearcoatMap = null; mat.clearcoat = 0.4; mat.clearcoatRoughness = 0.16;
+        } else if (lam === 'softtouch') {
+          mat.clearcoatMap = null; mat.clearcoat = 0; mat.clearcoatRoughness = 1; mat.envMapIntensity = maps.hasMetal ? 1.25 : 0.45;
         } else {
           mat.clearcoatMap = null; mat.clearcoat = 0; mat.clearcoatRoughness = lam === 'matte' ? 0.5 : 0.25;
         }
@@ -136,7 +161,11 @@ export function createView3D(container) {
       }
       const half = (geo.ctx.t || 0) / 2;
       const zOff = new THREE.Matrix4();
-      if (!m.userData.extra && half) zOff.makeTranslation(0, 0, m.userData.side === 'b' ? -half : half);
+      if (m.userData.extra?.type === 'magnet') {
+        zOff.makeTranslation(m.userData.extra.x, -m.userData.extra.y, half + 0.15);
+      } else if (!m.userData.extra && half) {
+        zOff.makeTranslation(0, 0, m.userData.side === 'b' ? -half : half);
+      }
       m.matrix.copy(viewM).multiply(off).multiply(M).multiply(zOff); m.matrixWorldNeedsUpdate = true;
     }
     // centre model at origin, ground below

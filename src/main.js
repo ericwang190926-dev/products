@@ -6,6 +6,7 @@ import {
   defaultMaterialFor, resolvedThickness, materialSummary, materialShort,
   materialFromLegacy, quoteInfoLines, kindName,
 } from './core/materials.js';
+import { resolveBoxDims, fmtSize } from './core/dims.js';
 import { usedProcesses, regionsByProcess } from './core/finish.js';
 import { buildGeometry } from './core/model.js';
 import { FACE_NAMES } from './core/builder.js';
@@ -20,8 +21,8 @@ const state = {
   styleId: 'hanger', dims: { ...STYLE_MAP.hanger.defaults },
   mat: defaultMaterialFor('hanger'), materialId: 'card350', t: 0.5, faceT: 0, bleed: 3, params: {},
   boxColor: '#ffffff', boardColor: '#f1ede4', faceColors: {}, elements: [], selected: null, selectedFace: 'front',
-  selectedFinish: null, lamination: 'none', finishRegions: [], drawFinish: false, finishUid: 1,
-  layers: { art: true, cut: true, crease: true, bleed: true, glue: true, dims: true, labels: true, finish: true },
+  selectedFinish: null, lamination: 'none', finishRegions: [], drawFinish: false, finishUid: 1, dimMode: 'outer',
+  layers: { art: true, cut: true, crease: true, bleed: true, glue: true, dims: true, labels: true, finish: true, magnet: true },
   dimsTouched: false, materialTouched: false,
 };
 function syncMaterial() {
@@ -57,14 +58,14 @@ function render2D(opts) { view2d.render(geo, state, opts); }
 
 function rebuild({ refit = false } = {}) {
   try {
-    geo = buildGeometry(state.styleId, { ...state.dims, t: state.t, bleed: state.bleed, params: state.params, wrap: state.mat.structure === 'rigid', turnIn: state.mat.turnIn ?? 15, faceT: state.faceT });
+    geo = buildGeometry(state.styleId, { ...state.dims, t: state.t, bleed: state.bleed, params: state.params, wrap: state.mat.structure === 'rigid', turnIn: state.mat.turnIn ?? 15, faceT: state.faceT, dimMode: state.dimMode });
   } catch (e) { console.error(e); toast('参数无效：' + e.message); return; }
   if (!geo.faces.find((f) => f.id === state.selectedFace)) state.selectedFace = geo.faces[0]?.id || null;
   render2D({ fit: refit });
   view3d.setGeometry(geo, state, { refit });
   view3d.setFold(+$('#fold').value, +$('#open').value);
   renderStruct(); renderArtPanel();
-  const st = geo.style; $('#curStyle').textContent = `${st.name}　|　内尺寸 ${fmtDims()} mm　|　${materialShort(state.mat, state.t)}`;
+  const st = geo.style; const tag = state.dimMode === 'inner' ? '内尺寸' : '外尺寸'; $('#curStyle').textContent = `${st.name}　|　${tag} ${fmtDims()} mm　|　${materialShort(state.mat, state.t)}`;
   document.querySelectorAll('.card').forEach((c) => c.classList.toggle('on', c.dataset.id === state.styleId));
 }
 const fmtDims = () => { const d = STYLE_MAP[state.styleId].dims; return ['L', 'W', 'H'].filter((k) => d[k]).map((k) => state.dims[k]).join(' × '); };
@@ -112,7 +113,8 @@ function gsmPicks(id, values, current) {
   return h;
 }
 function paramBlock(params, advanced) {
-  const list = params.filter((p) => advanced === ADVANCED_PARAMS.has(p.key));
+  const fullLid = geo.style.id === 'lidbase' && geo.ctx.p.lidType === 'full';
+  const list = params.filter((p) => advanced === ADVANCED_PARAMS.has(p.key) && p.type !== 'choice' && !(fullLid && p.key === 'lidH'));
   if (!list.length) return '';
   let h = '';
   const c = geo.ctx;
@@ -128,9 +130,20 @@ function renderStruct() {
   const st = geo.style, c = geo.ctx; const d = st.dims; const mat = state.mat;
   let h = `<div class="sec"><h3>${st.name}</h3><p class="desc">${st.desc}</p></div>`;
   h += `<div class="sec"><h3>盒子尺寸 (mm) <button class="small" id="useDefaults" title="恢复该盒型推荐尺寸">推荐尺寸</button></h3>`;
-  h += `<p class="desc">这里填的是<strong>产品放进去的尺寸（内尺寸）</strong>，不是盒子外面量到的大小。工具会按纸板厚度自动加放。</p><div class="dims3">`;
+  if (state.dimMode === 'inner') {
+    h += `<p class="desc">当前按<strong>内尺寸</strong>填写（产品放进去的空间）。可在下方高级设置改回外尺寸。</p>`;
+  } else {
+    h += `<p class="desc">这里填盒子外面量到的尺寸（<strong>外尺寸</strong>），工具会按板厚算出里面能放多大的产品。</p>`;
+  }
+  h += `<div class="dims3">`;
   for (const k of ['L', 'W', 'H']) if (d[k]) h += `<div><span>${d[k]}</span><input type="number" step="0.5" min="1" data-dim="${k}" value="${state.dims[k]}"/></div>`;
-  h += `</div></div>`;
+  h += `</div>`;
+  const inner = c.inner || { L: c.L, W: c.W, H: c.H };
+  const outer = c.outer || { L: c.L + 2 * c.t, W: c.W + 2 * c.t, H: c.H + 2 * c.t };
+  const keys = ['L', 'W', 'H'].filter((k) => d[k]);
+  if (state.dimMode === 'outer') h += `<p class="desc" style="margin-top:8px">里面大约能放 <b>${fmtSize(inner, keys)}</b> mm 的产品。</p>`;
+  else h += `<p class="desc" style="margin-top:8px">成品外面大约 <b>${fmtSize(outer, keys)}</b> mm。</p>`;
+  h += `</div>`;
 
   h += `<div class="sec" id="materialSec"><h3>用料</h3><div class="summary">${materialSummary(mat, state.t)}</div>`;
   h += `<div class="field"><span class="lbl">盒子做法</span><div class="struct-opts">`;
@@ -164,6 +177,13 @@ function renderStruct() {
   }
   h += `</div>`;
 
+  if (st.id === 'lidbase') {
+    const typ = c.p.lidType === 'full' ? 'full' : 'half';
+    h += `<div class="sec"><h3>盖型</h3><div class="struct-opts">`;
+    h += `<label class="${typ === 'half' ? 'on' : ''}"><input type="radio" name="lidType" value="half" ${typ === 'half' ? 'checked' : ''} hidden/><span class="nm">鞋盒式（半盖）</span><span class="hp">盖只盖住一部分高度，像鞋盒那样，默认大约盖到整盒高度的三分之一，也可以自己改盖高。</span></label>`;
+    h += `<label class="${typ === 'full' ? 'on' : ''}"><input type="radio" name="lidType" value="full" ${typ === 'full' ? 'checked' : ''} hidden/><span class="nm">全盖（天盖盖到底）</span><span class="hp">盖子和整盒一样高，一直盖到盒底；底盒会略小一点，刚好套进盖里。外尺寸按盒盖外面算。</span></label>`;
+    h += `</div></div>`;
+  }
   const vis = paramBlock(st.params, false);
   if (vis) h += `<div class="sec"><h3>这个盒子还可以调</h3>${vis}</div>`;
 
@@ -194,6 +214,10 @@ function renderStruct() {
 
   const adv = paramBlock(st.params, true);
   h += `<div class="sec"><details class="advanced"><summary>高级设置（一般不用改）</summary>`;
+  h += `<div class="field"><span class="lbl">${tip('尺寸怎么填', '默认按盒子外面量到的尺寸。如果要按产品放进去的尺寸来填，选内尺寸。')}</span><div class="chips">`;
+  h += `<span class="chip ${state.dimMode === 'outer' ? 'on' : ''}" data-dim-mode="outer">外尺寸</span>`;
+  h += `<span class="chip ${state.dimMode === 'inner' ? 'on' : ''}" data-dim-mode="inner">内尺寸</span>`;
+  h += `</div></div>`;
   h += `<div class="row"><label>${tip('多印边', '图案多印出来的边，防止切开时切歪了露出白边。一般 3mm 即可。')}</label><input type="number" id="bleed" step="0.5" min="0" max="10" value="${state.bleed}"/></div>`;
   if (mat.structure === 'rigid') h += `<div class="row"><label>${tip('裱纸包边', '面纸折进盒子里面的宽度，礼盒常用 15mm。')}</label><input type="number" id="turnIn" step="0.5" min="8" max="30" value="${mat.turnIn ?? 15}"/></div>`;
   h += `<div class="row"><label>${tip('手动指定板厚', '一般不用填。只有你已经量过实际厚度、想覆盖按克重估算的值时才改。')}</label><input type="number" id="thick" step="0.05" min="0" max="8" placeholder="自动 ${state.t.toFixed(2)}" value="${mat.tOverride ?? ''}"/></div>`;
@@ -201,8 +225,10 @@ function renderStruct() {
   h += `</details></div>`;
 
   const tt = state.t, bb = geo.bbox, bl = geo.bboxBleed;
+  const ikeys = ['L', 'W', 'H'].filter((k) => d[k]);
   h += `<div class="sec"><h3>算出来的尺寸</h3><div class="info">`;
-  h += `成品外面大约 <b>${(c.L + 2 * tt).toFixed(1)} × ${(c.W + 2 * tt).toFixed(1)} × ${(c.H + 2 * tt).toFixed(1)}</b> mm（已加上纸厚）<br/>`;
+  h += `外尺寸 <b>${fmtSize(c.outer || { L: c.L + 2 * tt, W: c.W + 2 * tt, H: c.H + 2 * tt }, ikeys)}</b> mm<br/>`;
+  h += `内尺寸（里面能放的产品） <b>${fmtSize(c.inner || { L: c.L, W: c.W, H: c.H }, ikeys)}</b> mm<br/>`;
   h += `刀版展开 <b>${bb.w.toFixed(1)} × ${bb.h.toFixed(1)}</b> mm<br/>算上多印边 <b>${bl.w.toFixed(1)} × ${bl.h.toFixed(1)}</b> mm<br/>`;
   const cutLen = geo.cut.reduce((s, l) => s + l.slice(1).reduce((a, p, i) => a + Math.hypot(p[0] - l[i][0], p[1] - l[i][1]), 0), 0);
   const crLen = geo.crease.reduce((s, l) => s + Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]), 0);
@@ -214,6 +240,18 @@ function renderStruct() {
 }
 let dimTimer;
 function applyMatChange() { state.mat.tOverride = null; state.materialTouched = true; syncMaterial(); rebuild(); }
+function switchDimMode(next) {
+  if (!next || next === state.dimMode) return;
+  const st = STYLE_MAP[state.styleId];
+  const keys = ['L', 'W', 'H'].filter((k) => st.dims[k]);
+  const cur = geo?.ctx;
+  if (cur?.inner && cur?.outer) {
+    const src = next === 'inner' ? cur.inner : cur.outer;
+    for (const k of keys) if (src[k] != null) state.dims[k] = Math.round(src[k] * 10) / 10;
+  }
+  state.dimMode = next;
+  rebuild({ refit: true });
+}
 $('#tabStruct').addEventListener('input', (e) => {
   const el = e.target;
   clearTimeout(dimTimer);
@@ -237,6 +275,7 @@ $('#tabStruct').addEventListener('change', (e) => {
     state.mat = next; applyMatChange();
   }
   if (el.name === 'flute') { state.mat.flute = el.value; applyMatChange(); }
+  if (el.name === 'lidType') { state.params.lidType = el.value; if (el.value === 'full') delete state.params.lidH; rebuild({ refit: true }); }
 });
 $('#tabStruct').addEventListener('click', (e) => {
   const gsmBtn = e.target.closest('button.gsm');
@@ -245,6 +284,8 @@ $('#tabStruct').addEventListener('click', (e) => {
   if (faceKind) { state.mat.faceKind = faceKind.dataset.faceKind; if (state.mat.structure === 'carton') state.mat.faceGsm = state.mat.boardGsm; applyMatChange(); return; }
   const sp = e.target.closest('[data-special]');
   if (sp) { state.mat.specialType = sp.dataset.special; applyMatChange(); return; }
+  const dmode = e.target.closest('[data-dim-mode]');
+  if (dmode) { switchDimMode(dmode.dataset.dimMode); return; }
   const lam = e.target.closest('[data-lam]');
   if (lam) { state.lamination = lam.dataset.lam; scheduleTexture(); render2D(); renderStruct(); return; }
   const fin = e.target.closest('[data-finish]');
@@ -426,7 +467,7 @@ function demoArtwork() {
 function switchTab(tab) { document.querySelectorAll('#propTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab)); $('#tabStruct').hidden = tab !== 'struct'; $('#tabArt').hidden = tab !== 'art'; }
 $('#propTabs').addEventListener('click', (e) => e.target.dataset.tab && switchTab(e.target.dataset.tab));
 $('#viewMode').addEventListener('click', (e) => { const m = e.target.dataset.mode; if (!m) return; document.querySelectorAll('#viewMode button').forEach((b) => b.classList.toggle('on', b === e.target)); $('#views').className = m === 'split' ? 'split' : 'm' + m; setTimeout(() => view2d.fitView(), 30); });
-const LAYER_NAMES = { art: '图稿', cut: '刀线', crease: '压痕线', bleed: '多印边', glue: '涂胶位置', dims: '尺寸', labels: '面标注', finish: '工艺' };
+const LAYER_NAMES = { art: '图稿', cut: '刀线', crease: '压痕线', bleed: '多印边', glue: '涂胶位置', dims: '尺寸', labels: '面标注', finish: '工艺', magnet: '磁铁位置' };
 $('#layerToggles').innerHTML = Object.entries(LAYER_NAMES).map(([k, n]) => `<label><input type="checkbox" data-layer="${k}" checked/>${n}</label>`).join('');
 $('#layerToggles').addEventListener('change', (e) => { state.layers[e.target.dataset.layer] = e.target.checked; render2D(); });
 $('#zoomFit').onclick = () => view2d.fitView(); $('#zoomIn').onclick = () => view2d.zoom(1 / 1.25); $('#zoomOut').onclick = () => view2d.zoom(1.25);
@@ -444,12 +485,12 @@ function processLayers() {
   return usedProcesses(state).map((p) => ({ id: p.id, name: p.name, pdfSpot: p.pdfSpot, color: p.color, cmyk: p.cmyk, polys: (by[p.id] || []).map((x) => x.poly) })).filter((p) => p.polys.length);
 }
 function infoLines() {
-  const c = geo.ctx, t = state.t;
-  const outer = [c.L + 2 * t, c.W + 2 * t, c.H + 2 * t];
+  const c = geo.ctx;
   const lines = quoteInfoLines({
     style: geo.style, dims: state.dims, mat: state.mat, t: state.t, faceT: state.faceT,
     bleed: state.bleed, bbox: geo.bbox, bboxBleed: geo.bboxBleed,
-    lamination: state.lamination, finishRegions: state.finishRegions, outer,
+    lamination: state.lamination, finishRegions: state.finishRegions,
+    outer: c.outer, inner: c.inner, lidType: c.p?.lidType,
   });
   const day = new Date();
   const local = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
@@ -471,8 +512,8 @@ $('#expDXF').onclick = () => download(baseName() + '_dieline.dxf', buildDXF(geo)
 $('#expFlat').onclick = () => { const { canvas } = renderFlat(geo, state, { ppm: 8, maxPx: 6000, lines: true, background: '#ffffff' }); canvas.toBlob((b) => download(baseName() + '_flat.png', b)); };
 $('#exp3D').onclick = () => download(baseName() + '_3d.png', new Blob([dataURLtoBytes(view3d.snapshot(2))], { type: 'image/png' }));
 $('#btnSave').onclick = () => {
-  const { styleId, dims, materialId, t, bleed, params, boxColor, boardColor, faceColors, elements, mat, lamination, finishRegions, faceT } = state;
-  download(baseName() + '.json', JSON.stringify({ app: 'dieline-studio', version: 2, styleId, dims, materialId, t, faceT, bleed, params, boxColor, boardColor, faceColors, elements, mat, lamination, finishRegions }, null, 1), 'application/json');
+  const { styleId, dims, materialId, t, bleed, params, boxColor, boardColor, faceColors, elements, mat, lamination, finishRegions, faceT, dimMode } = state;
+  download(baseName() + '.json', JSON.stringify({ app: 'dieline-studio', version: 3, styleId, dims, materialId, t, faceT, bleed, params, boxColor, boardColor, faceColors, elements, mat, lamination, finishRegions, dimMode }, null, 1), 'application/json');
 };
 $('#fileProject').addEventListener('change', (e) => {
   const file = e.target.files[0]; if (!file) return; const r = new FileReader();
@@ -482,7 +523,7 @@ $('#fileProject').addEventListener('change', (e) => {
 function loadProject(p) {
   if (p.app !== 'dieline-studio' || !STYLE_MAP[p.styleId]) throw new Error('不是有效的刀版项目');
   const mat = p.mat || materialFromLegacy(p.materialId, p.t);
-  Object.assign(state, { styleId: p.styleId, dims: p.dims, mat, materialId: p.materialId, t: p.t, bleed: p.bleed ?? 3, params: p.params || {}, boxColor: p.boxColor, boardColor: p.boardColor, faceColors: p.faceColors || {}, elements: p.elements || [], selected: null, selectedFinish: null, lamination: p.lamination || 'none', finishRegions: p.finishRegions || [], dimsTouched: true, materialTouched: true, drawFinish: false });
+  Object.assign(state, { styleId: p.styleId, dims: p.dims, mat, materialId: p.materialId, t: p.t, bleed: p.bleed ?? 3, params: p.params || {}, boxColor: p.boxColor, boardColor: p.boardColor, faceColors: p.faceColors || {}, elements: p.elements || [], selected: null, selectedFinish: null, lamination: p.lamination || 'none', finishRegions: p.finishRegions || [], dimsTouched: true, materialTouched: true, drawFinish: false, dimMode: p.dimMode || (p.version >= 3 ? 'outer' : 'inner') });
   syncMaterial();
   if (p.t != null && p.mat && p.mat.tOverride == null && Math.abs(state.t - p.t) > 0.02) { state.mat.tOverride = p.t; syncMaterial(); }
   uid = 1 + Math.max(0, ...state.elements.map((e) => parseInt(String(e.id).slice(1)) || 0));

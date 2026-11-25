@@ -7,8 +7,8 @@ const fromC = (path) => path.map((p) => [p.X / SCALE, p.Y / SCALE]);
 
 export const FACE_NAMES = { front: '正面', back: '背面', left: '左侧面', right: '右侧面', top: '顶面', bottom: '底面', header: '挂头/展示面', inside: '内面' };
 export const FACE_EN = { front: 'FRONT', back: 'BACK', left: 'LEFT', right: 'RIGHT', top: 'TOP', bottom: 'BOTTOM', header: 'HEADER', inside: 'INSIDE' };
-export const KIND_NAMES = { panel: '', glue: '粘口', tuck: '插舌', dust: '防尘翼', lid: '盖', flap: '折翼', lock: '锁扣', wall: '墙板', inner: '内折', corner: '粘角', header: '挂头', handle: '提手', ear: '耳翼', wrap: '裱纸' };
-export const KIND_EN = { glue: 'GLUE', tuck: 'TUCK', dust: 'DUST FLAP', lid: 'LID', flap: 'FLAP', lock: 'LOCK', wall: 'WALL', inner: 'INNER', corner: 'CORNER', header: 'HEADER', handle: 'HANDLE', ear: 'EAR', wrap: 'WRAP PAPER' };
+export const KIND_NAMES = { panel: '', glue: '粘口', tuck: '插舌', dust: '防尘翼', lid: '盖', flap: '折翼', hem: '包边', lock: '锁扣', wall: '墙板', inner: '内折', corner: '粘角', header: '挂头', handle: '提手', ear: '耳翼', wrap: '裱纸' };
+export const KIND_EN = { glue: 'GLUE', tuck: 'TUCK', dust: 'DUST FLAP', lid: 'LID', flap: 'FLAP', hem: 'HEM / FLAP', lock: 'LOCK', wall: 'WALL', inner: 'INNER', corner: 'CORNER', header: 'HEADER', handle: 'HANDLE', ear: 'EAR', wrap: 'WRAP PAPER' };
 
 /**
  * Collects panels (a hinge tree for 3D folding) plus extra lines; then derives cut/crease lines.

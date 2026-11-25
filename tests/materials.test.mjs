@@ -191,3 +191,124 @@ test('PDF includes process spot colours and remains a valid PDF', async () => {
   assert.ok(s.includes('/Type /OCG /Name (Cut)') && s.includes('/Type /OCG /Name (Foil_Gold)'));
   assert.ok(pdf.length > 20000, 'pdf has outline font paths');
 });
+
+import { resolveBoxDims, innerFromOuter, outerFromInner } from '../src/core/dims.js';
+import { computeFold, foldedBBox } from '../src/core/fold.js';
+
+test('outer dims of a carton shrink inner by 2t on each axis', () => {
+  const r = resolveBoxDims('ste', { L: 40, W: 26, H: 201, t: 0.5, dimMode: 'outer' });
+  near(r.inner.L, 39, 1e-9, 'inner L');
+  near(r.inner.W, 25, 1e-9, 'inner W');
+  near(r.inner.H, 200, 1e-9, 'inner H');
+  near(r.A, 39.5, 1e-9, 'mid A');
+  const geo = buildGeometry('ste', { L: 40, W: 26, H: 201, t: 0.5, dimMode: 'outer' });
+  near(bbox(geo.byId.front.poly).w, 39.5, 1e-6, 'front panel = outer L - t');
+  near(geo.ctx.outer.L, 40, 1e-9, 'ctx keeps outer L');
+});
+
+test('inner-mode carton still grows panels as inner + t (legacy)', () => {
+  const geo = buildGeometry('ste', { L: 30, W: 25, H: 200, t: 0.5 });
+  near(bbox(geo.byId.front.poly).w, 30.5, 1e-6, 'legacy inner');
+});
+
+test('outer and inner conversions are inverse for a tuck box', () => {
+  const t = 0.5, L = 30, W = 25, H = 200;
+  const o = outerFromInner('ste', { L, W, H, t });
+  const i = innerFromOuter('ste', { ...o, t });
+  near(i.L, L, 1e-9, 'roundtrip L'); near(i.W, W, 1e-9, 'roundtrip W'); near(i.H, H, 1e-9, 'roundtrip H');
+});
+
+test('天地盒 外尺寸 is the lid outside; thicker board reduces inner space', () => {
+  const t1 = 1.55, t2 = 2.2, cl = 1;
+  const a = resolveBoxDims('lidbase', { L: 220, W: 120, H: 60, t: t1, dimMode: 'outer', params: { clear: cl, lidType: 'half' } });
+  const b = resolveBoxDims('lidbase', { L: 220, W: 120, H: 60, t: t2, dimMode: 'outer', params: { clear: cl, lidType: 'half' } });
+  assert.ok(b.inner.L < a.inner.L, 'thicker board → smaller inner');
+  near(a.outer.L, 220, 1e-9, 'outer L stays');
+  // lid mid-plane = outer - t, base mid = lid mid - 2t - 2c
+  near(a.A + 2 * t1 + 2 * cl, 220 - t1, 1e-6, 'lid mid from outer');
+});
+
+test('天地盒 全盖 lid reaches full height and base is shorter and narrower', () => {
+  const g = buildGeometry('lidbase', { L: 200, W: 100, H: 50, t: 2, params: { lidType: 'full', clear: 1 } });
+  const base = bbox(g.byId.base.poly), lid = bbox(g.byId.lidbase.poly);
+  const cl = g.ctx.p.clear;
+  assert.ok(lid.w > base.w, 'lid wider than base');
+  near(lid.w - base.w, 2 * 2 + 2 * cl, 1e-6, 'lid allowance 2t+2c');
+  const lidWall = bbox(g.byId.lidfront.poly);
+  const baseWall = bbox(g.byId.front.poly);
+  assert.ok(lidWall.h > baseWall.h + 1, `full lid wall ${lidWall.h} taller than base ${baseWall.h}`);
+  near(lidWall.h, g.ctx.lidD, 1e-6, 'lid wall = full lidD');
+  const env = foldedBBox(g, computeFold(g, { progress: 1 }));
+  const got = [env.size.x, env.size.y, env.size.z].sort((a, b) => a - b);
+  const want = [g.ctx.lidA, g.ctx.lidB, g.ctx.lidD].sort((a, b) => a - b);
+  for (let i = 0; i < 3; i++) near(got[i], want[i], 0.2, `full-lid envelope ${i}`);
+});
+
+test('天地盒 半盖 default lid height is about one third', () => {
+  const g = buildGeometry('lidbase', { L: 220, W: 120, H: 60, t: 1.9 });
+  assert.notEqual(g.ctx.p.lidType, 'full');
+  const wall = bbox(g.byId.lidfront.poly);
+  near(wall.h, g.ctx.p.lidH, 1e-6, 'lidH applied');
+  assert.ok(g.ctx.p.lidH >= 15 && g.ctx.p.lidH <= g.ctx.D, 'lidH in range');
+  assert.ok(Math.abs(g.ctx.p.lidH - (60 + 2 * 1.9) / 3) < 8 || Math.abs(g.ctx.p.lidH - 60 / 3) < 8, `lidH ${g.ctx.p.lidH} near 1/3`);
+});
+
+test('书型盒 has a front flap and 4 magnet marks (2 on flap, 2 on tray front)', () => {
+  const g = buildGeometry('book', { L: 220, W: 120, H: 60, t: 1.9, wrap: true });
+  assert.ok(g.byId.flap && g.byId.flapHinge, 'flap + hinge panels');
+  const flap = bbox(g.byId.flap.poly);
+  near(flap.w, g.ctx.p.flapH, 0.05, 'flap height');
+  const mags = g.marks.filter((m) => m.type === 'magnet');
+  assert.equal(mags.length, 4, `got ${mags.length} magnets`);
+  for (const m of mags) near(m.r, 6, 1e-6, 'default Ø12 → r=6');
+  const onFlap = mags.filter((m) => m.panel === 'flap');
+  const onTray = mags.filter((m) => m.panel === 'tright');
+  assert.equal(onFlap.length, 2);
+  assert.equal(onTray.length, 2);
+  const inset = g.ctx.p.magnetInset;
+  const ys = onFlap.map((m) => m.y).sort((a, b) => a - b);
+  near(ys[0], inset, 0.2, 'left inset');
+  near(ys[1], flap.h - inset, 0.2, 'right inset');
+  // matching Y on the tray wall
+  const tys = onTray.map((m) => m.y).sort((a, b) => a - b);
+  near(tys[0], ys[0], 0.2, 'tray matches flap y0');
+  near(tys[1], ys[1], 0.2, 'tray matches flap y1');
+  assert.ok(g.sheets.some((s) => s.label === '裱纸（封面）'), 'wrap includes cover');
+});
+
+test('书型盒 magnet diameter and inset are adjustable', () => {
+  const g = buildGeometry('book', { L: 220, W: 120, H: 60, t: 1.9, params: { magnetD: 10, magnetInset: 20 } });
+  const mags = g.marks.filter((m) => m.type === 'magnet');
+  assert.ok(mags.every((m) => Math.abs(m.r - 5) < 1e-9), 'Ø10');
+  const ys = mags.filter((m) => m.panel === 'flap').map((m) => m.y).sort((a, b) => a - b);
+  near(ys[0], 20, 0.2, 'inset 20');
+});
+
+test('quote lines list 外尺寸 and 内尺寸, 盖型, and 触感膜', () => {
+  const style = STYLE_MAP.lidbase;
+  const mat = defaultMaterialFor('lidbase');
+  const { t, faceT } = resolvedThickness(mat);
+  const sizes = resolveBoxDims(style, { ...style.defaults, t, dimMode: 'outer', params: { lidType: 'full' } });
+  const lines = quoteInfoLines({
+    style, dims: style.defaults, mat, t, faceT, bleed: 3,
+    lamination: 'softtouch', finishRegions: [],
+    outer: sizes.outer, inner: sizes.inner, lidType: 'full',
+  });
+  const blob = lines.join('\n');
+  assert.match(blob, /外尺寸/);
+  assert.match(blob, /内尺寸/);
+  assert.match(blob, /盖型：全盖/);
+  assert.match(blob, /触感膜/);
+});
+
+test('书型盒 PDF has a 磁铁位置 layer', async () => {
+  const { buildPDF } = await import('../src/export/pdf.js');
+  const { buildSVG } = await import('../src/export/vector.js');
+  const style = STYLE_MAP.book;
+  const geo = buildGeometry('book', { ...style.defaults, t: 1.9, wrap: true, bleed: 3 });
+  const pdf = buildPDF(geo, { info: ['书型盒'] });
+  const s = Buffer.from(pdf).toString('latin1');
+  assert.ok(s.includes('/OC /ocMagnet') || s.includes('ocMagnet'), 'pdf magnet OCG');
+  const svg = buildSVG(geo);
+  assert.match(svg, /磁铁位置/);
+});

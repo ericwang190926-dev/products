@@ -71,10 +71,19 @@ export function createView2D(svg, hooks) {
     if (L.crease) o += `<path d="${geo.crease.map(polyline).join('')}" stroke="#11a04a" stroke-width="1.3" vector-effect="non-scaling-stroke" stroke-dasharray="7 4"/>`;
     if (L.cut) { o += `<path d="${geo.cut.map(polyline).join('')}" stroke="#e0262b" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`; if (geo.perf.length) o += `<path d="${geo.perf.map(polyline).join('')}" stroke="#e0262b" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-dasharray="2 2"/>`; }
     for (const m of geo.marks) {
-      if (m.type === 'label') { o += `<text x="${f(m.x)}" y="${f(m.y)}" font-size="3.6" fill="#6b7280" stroke="none" text-anchor="middle" dominant-baseline="central">${escX(m.text || '')}</text>`; continue; }
-      o += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${m.r}" stroke="#7c3aed" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="3 2"/><text x="${f(m.x)}" y="${f(m.y + m.r + 3.5)}" font-size="3" fill="#7c3aed" stroke="none" text-anchor="middle">磁铁</text>`;
+      if (m.type === 'label') { o += `<text x="${f(m.x)}" y="${f(m.y)}" font-size="3.6" fill="#6b7280" stroke="none" text-anchor="middle" dominant-baseline="central">${escX(m.text || '')}</text>`; }
     }
     o += `</g>`;
+    if (L.magnet !== false) {
+      const magnets = geo.marks.filter((m) => m.type === 'magnet');
+      if (magnets.length) {
+        o += `<g id="lyr-magnet" pointer-events="none" fill="none">`;
+        for (const m of magnets) {
+          o += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${f(m.r)}" stroke="#7c3aed" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="3 2"/><text x="${f(m.x)}" y="${f(m.y + m.r + 3.5)}" font-size="3" fill="#7c3aed" stroke="none" text-anchor="middle">${escX(m.text || '磁铁')}</text>`;
+        }
+        o += `</g>`;
+      }
+    }
     if (L.labels) {
       o += `<g pointer-events="none" fill="#5b6170" text-anchor="middle" dominant-baseline="central" font-family='"Noto Sans CJK SC",sans-serif'>`;
       for (const p of geo.panels) {

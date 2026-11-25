@@ -21,8 +21,14 @@ export function buildSVG(geo, { artDataUrl = null, processLayers = [] } = {}) {
     if (d.dir === 'h') dm += `<path d="M${f(d.x1)} ${f(d.ref)} V${f(d.at + 1.5)} M${f(d.x2)} ${f(d.ref)} V${f(d.at + 1.5)} M${f(d.x1)} ${f(d.at)} H${f(d.x2)}" stroke="#333" stroke-width="0.12" fill="none"/><text x="${f((d.x1 + d.x2) / 2)}" y="${f(d.at - 1)}" font-size="${d.overall ? 3.2 : 2.6}" text-anchor="middle" font-family="Arial">${v}</text>\n`;
     else dm += `<path d="M${f(d.ref)} ${f(d.y1)} H${f(d.at - 1.5)} M${f(d.ref)} ${f(d.y2)} H${f(d.at - 1.5)} M${f(d.at)} ${f(d.y1)} V${f(d.y2)}" stroke="#333" stroke-width="0.12" fill="none"/><text transform="translate(${f(d.at - 1)} ${f((d.y1 + d.y2) / 2)}) rotate(-90)" font-size="${d.overall ? 3.2 : 2.6}" text-anchor="middle" font-family="Arial">${v}</text>\n`;
   }
-  for (const m of geo.marks) dm += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${f(m.r)}" fill="none" stroke="#333" stroke-width="0.15" stroke-dasharray="0.8 0.8"/>`;
+  for (const m of geo.marks) if (m.type === 'label') dm += '';
   s += L('Dimensions', dm);
+  const magnets = (geo.marks || []).filter((m) => m.type === 'magnet');
+  if (magnets.length) {
+    let mg = '';
+    for (const m of magnets) mg += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${f(m.r)}" fill="none" stroke="#7c3aed" stroke-width="0.2" stroke-dasharray="0.8 0.8"/><text x="${f(m.x)}" y="${f(m.y + m.r + 3.2)}" font-size="2.6" text-anchor="middle" fill="#7c3aed" font-family='"Noto Sans CJK SC",sans-serif">${m.text || '磁铁'}</text>\n`;
+    s += L('磁铁位置', mg);
+  }
   let lb = geo.panels.map((p) => { const t = p.face ? FACE_NAMES[p.face] : KIND_NAMES[p.kind]; if (!t) return ''; const xs = p.poly.map((q) => q[0]), ys = p.poly.map((q) => q[1]); const sz = Math.max(1.5, Math.min(6, Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 0.18)); return `<text x="${f((Math.max(...xs) + Math.min(...xs)) / 2)}" y="${f((Math.max(...ys) + Math.min(...ys)) / 2)}" font-size="${f(sz)}" text-anchor="middle" dominant-baseline="middle" fill="#666" font-family='"Noto Sans CJK SC",sans-serif'>${t}</text>`; }).join('\n');
   for (const sh of geo.sheets || []) if (sh.label) {
     const xs = sh.poly.map((q) => q[0]), ys = sh.poly.map((q) => q[1]);
