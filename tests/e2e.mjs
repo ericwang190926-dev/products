@@ -132,10 +132,25 @@ await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
 await setMode('2d'); await page.waitForTimeout(400);
 await page.locator('#v2d').screenshot({ path: `${SHOTS}/book_magnet_dieline.png` });
 await setMode('3d'); await setFold(1, 0.12); await page.waitForTimeout(600);
-await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_magnet_3d.png` });
-ok('书型盒 has 包边 and 4 magnet marks', await page.evaluate(() => {
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_long_3d.png` });
+ok('书型盒 defaults to 长边打开 with flap along the long edge', await page.evaluate(() => {
   const g = window.__app.geo;
-  return !!(g.byId.flap && g.marks.filter((m) => m.type === 'magnet').length === 4);
+  const flap = g.byId.flap, lid = g.byId.lid;
+  const fh = Math.max(...flap.poly.map((p) => p[1])) - Math.min(...flap.poly.map((p) => p[1]));
+  const lh = Math.max(...lid.poly.map((p) => p[1])) - Math.min(...lid.poly.map((p) => p[1]));
+  return g.ctx.p.openDir === 'long' && g.marks.filter((m) => m.type === 'magnet').length === 4 && Math.abs(fh - lh) < 1;
+}));
+await page.click('#propTabs button[data-tab="struct"]');
+await page.locator('label:has(input[name="openDir"][value="short"])').click();
+await page.waitForTimeout(700);
+await setMode('3d'); await setFold(1, 0.12); await page.waitForTimeout(600);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_short_3d.png` });
+ok('书型盒 短边打开 moves flap to the short edge', await page.evaluate(() => {
+  const g = window.__app.geo;
+  const flap = g.byId.flap, lid = g.byId.lid;
+  const fh = Math.max(...flap.poly.map((p) => p[1])) - Math.min(...flap.poly.map((p) => p[1]));
+  const lh = Math.max(...lid.poly.map((p) => p[1])) - Math.min(...lid.poly.map((p) => p[1]));
+  return g.ctx.p.openDir === 'short' && Math.abs(fh - lh) < 1 && fh < 150;
 }));
 ok('覆膜 options include 触感膜', await page.evaluate(() => /触感膜/.test(document.body.innerText)));
 

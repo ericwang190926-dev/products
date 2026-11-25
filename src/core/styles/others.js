@@ -65,37 +65,46 @@ export function bookBox(c) {
   const flapGap = Math.max(t, p.flapGap ?? 1.5 * t);
   const flapH = clamp(p.flapH, 12, D);
   const magR = Math.max(3, (p.magnetD ?? 12) / 2);
-  const inset = Math.min(p.magnetInset ?? 18, Math.max(8, Wc / 2 - magR - 1));
+  // 默认长边打开（更像翻书）；短边打开保留原来从短头掀开的做法
+  const shortOpen = p.openDir === 'short';
+  const span = shortOpen ? Wc : Lc; // 沿书脊 / 开盒边的长度
+  const leaf = shortOpen ? Lc : Wc; // 封面进深（垂直于书脊）
+  const inset = Math.min(p.magnetInset ?? 18, Math.max(8, span / 2 - magR - 1));
   // 开盒边：包边 + 铰缝 + 封面 + 书脊 + 封底
-  const xHinge = flapH, xLid = flapH + flapGap, xSpine = xLid + Lc, xBack = xSpine + Hs;
-  const flapR = rect(0, 0, flapH, Wc);
-  const hingeR = rect(xHinge, 0, flapGap, Wc);
-  const front = rect(xLid, 0, Lc, Wc);
-  const spine = rect(xSpine, 0, Hs, Wc);
-  const back = rect(xBack, 0, Lc, Wc);
+  const xHinge = flapH, xLid = flapH + flapGap, xSpine = xLid + leaf, xBack = xSpine + Hs;
+  const flapR = rect(0, 0, flapH, span);
+  const hingeR = rect(xHinge, 0, flapGap, span);
+  const front = rect(xLid, 0, leaf, span);
+  const spine = rect(xSpine, 0, Hs, span);
+  const back = rect(xBack, 0, leaf, span);
   b.add('cover', back.poly, { face: 'bottom', kind: 'panel' });
   b.add('spine', spine.poly, { parent: 'cover', hinge: back.left, face: 'left', faceRot: 270 });
-  b.add('lid', front.poly, { parent: 'spine', hinge: spine.left, face: 'top', faceRot: 180, openable: true, kind: 'lid' });
+  b.add('lid', front.poly, { parent: 'spine', hinge: spine.left, face: 'top', faceRot: shortOpen ? 180 : 90, openable: true, kind: 'lid' });
   // 铰缝先随封面翻到水平，再把包边向下折 90°，合上时盖住内盒前墙
   b.add('flapHinge', hingeR.poly, { parent: 'lid', hinge: front.left, angle: 90, kind: 'panel' });
   b.add('flap', flapR.poly, { parent: 'flapHinge', hinge: hingeR.left, angle: 0, kind: 'hem' });
-  const tx = back.x + back.w + 15 + 2 * D, ty = Wc / 2 - B / 2;
-  tray(b, { pre: 't', x0: tx, y0: ty, A, B, D, t, faces: { front: 'back', back: 'front', right: 'right' }, root: { part: 'tray' } });
-  b.roots[1].assemble = place(to3(tx + A / 2, ty + B / 2), to3(back.cx, back.cy, -t));
-  const ys = [inset, Wc - inset];
+  const trayA = shortOpen ? A : B, trayB = shortOpen ? B : A;
+  const tx = back.x + back.w + 15 + 2 * D, ty = span / 2 - trayB / 2;
+  const faces = shortOpen
+    ? { front: 'back', back: 'front', right: 'right' }
+    : { front: 'right', back: 'left', right: 'front', left: 'back' };
+  tray(b, { pre: 't', x0: tx, y0: ty, A: trayA, B: trayB, D, t, faces, root: { part: 'tray' } });
+  b.roots[1].assemble = place(to3(tx + trayA / 2, ty + trayB / 2), to3(back.cx, back.cy, -t));
+  const ys = [inset, span - inset];
   const fx = flapR.x + flapH / 2;
   for (const y of ys) b.mark({ type: 'magnet', x: fx, y, r: magR, text: '磁铁', panel: 'flap' });
   // 开盒侧 = 内盒右墙（与包边相对）；从上口往下 flapH/2，左右边距与包边相同
-  const mx = tx + A + D - flapH / 2;
+  const mx = tx + trayA + D - flapH / 2;
   for (const y of ys) b.mark({ type: 'magnet', x: mx, y, r: magR, text: '磁铁', panel: 'tright' });
-  b.chains([0, flapH, xLid, xSpine, xBack, xBack + Lc], Wc, [0, Wc], 0);
-  b.note('书型盒：封面与内盒分开做，内盒底粘在封底上；开盒那边有包边，左右各一颗磁铁，合上时包边盖住内盒前墙。');
+  b.chains([0, flapH, xLid, xSpine, xBack, xBack + leaf], span, [0, span], 0);
+  b.note(`书型盒：封面与内盒分开做，内盒底粘在封底上；${shortOpen ? '短边' : '长边'}打开，开盒那边有包边，左右各一颗磁铁，合上时包边盖住内盒前墙。`);
+  if (!shortOpen) b.view3d = { rx: 90, ry: -90 };
   if (c.wrap) {
     const turn = c.turnIn ?? 15;
     const bbw = bboxOf(b);
     const x = bbw.x1 + 18;
-    const coverW = flapH + flapGap + 2 * Lc + Hs;
-    const cov = coverWrapShape({ w: coverW, h: Wc, turn, bands: [{ x: flapH, w: flapGap }, { x: flapH + flapGap + Lc, w: Hs }] });
+    const coverW = flapH + flapGap + 2 * leaf + Hs;
+    const cov = coverWrapShape({ w: coverW, h: span, turn, bands: [{ x: flapH, w: flapGap }, { x: flapH + flapGap + leaf, w: Hs }] });
     addWrapSheet(b, { id: 'wrapCover', x0: x, y0: 0, shape: cov, label: '裱纸（封面）' });
     const traySh = trayWrapShape({ Lo: A + t, Wo: B + t, wall: D, turn });
     addWrapSheet(b, { id: 'wrapTray', x0: x, y0: cov.h + 12, shape: traySh, label: '裱纸（内盒）' });

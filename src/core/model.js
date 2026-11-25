@@ -24,6 +24,6 @@ export function buildGeometry(styleId, opts) {
   const style = STYLE_MAP[styleId]; if (!style) throw new Error('unknown style ' + styleId);
   const ctx = makeContext(style, opts);
   const geo = finalize(style.build(ctx), { bleed: opts.bleed ?? 3 });
-  geo.style = style; geo.ctx = ctx; geo.view3d = style.view3d || { rx: 0, ry: 0 };
+  geo.style = style; geo.ctx = ctx; geo.view3d = geo.view3d || style.view3d || { rx: 0, ry: 0 };
   return geo;
 }

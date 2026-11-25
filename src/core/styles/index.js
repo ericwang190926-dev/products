@@ -37,8 +37,9 @@ export const STYLES = [
     build: O.lidBase, expect: O.lidBaseExpect, view3d: { rx: 90, ry: 180 },
   },
   {
-    id: 'book', name: '书型盒（磁吸翻盖）', en: 'Magnetic Book Box', category: 'rigid', desc: '封面 + 书脊 + 封底包内盒，开盒那边有包边，左右各一颗磁铁。', dims: LWH, defaults: { L: 220, W: 120, H: 60 }, material: 'grey2',
+    id: 'book', name: '书型盒（磁吸翻盖）', en: 'Magnetic Book Box', category: 'rigid', desc: '封面 + 书脊 + 封底包内盒。开盒方向可选长边或短边（默认长边打开，更像翻书），开盒那边有包边，左右各一颗磁铁。', dims: LWH, defaults: { L: 220, W: 120, H: 60 }, material: 'grey2',
     params: [
+      { key: 'openDir', label: '开盒方向', type: 'choice', def: () => 'long' },
       { key: 'flapH', label: '包边高度', hint: '开盒那边折下来、盖住内盒前墙的那条边的宽度。一般是盒子高度的一半左右。', def: (c) => Math.round(clamp(c.H * 0.5, 18, c.H)) },
       { key: 'overhang', label: '封面多出来的边', hint: '封面比内盒每边多出来的宽度，一般不用改。', def: (c) => (c.t >= 1 ? 2 : 1) },
       { key: 'magnetD', label: '磁铁直径', hint: '埋在包边和内盒前墙里的磁铁大小，常用 10 或 12mm。', def: () => 12 },

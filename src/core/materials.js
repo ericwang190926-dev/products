@@ -232,7 +232,7 @@ function fmtQuoteDims(style, obj) {
 }
 
 /** Quote-sheet lines in plain Chinese (also used on the PDF title block). */
-export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBleed, lamination, finishRegions, outer, inner, lidType }) {
+export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBleed, lamination, finishRegions, outer, inner, lidType, openDir }) {
   const outerObj = outer && !Array.isArray(outer) ? outer : (Array.isArray(outer) ? { L: outer[0], W: outer[1], H: outer[2] } : null);
   const innerObj = inner || dims;
   const lines = [
@@ -240,6 +240,9 @@ export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBl
   ];
   if (style.id === 'lidbase') {
     lines.push(`盖型：${lidType === 'full' ? '全盖（天盖盖到底）' : '鞋盒式半盖'}`);
+  }
+  if (style.id === 'book') {
+    lines.push(`开盒方向：${openDir === 'short' ? '短边打开' : '长边打开'}`);
   }
   if (outerObj) lines.push(`外尺寸（外面量到的尺寸）：${fmtQuoteDims(style, outerObj)}`);
   if (innerObj) lines.push(`内尺寸（里面能放的产品）：${fmtQuoteDims(style, innerObj)}`);

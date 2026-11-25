@@ -184,6 +184,13 @@ function renderStruct() {
     h += `<label class="${typ === 'full' ? 'on' : ''}"><input type="radio" name="lidType" value="full" ${typ === 'full' ? 'checked' : ''} hidden/><span class="nm">全盖（天盖盖到底）</span><span class="hp">盖子和整盒一样高，一直盖到盒底；底盒会略小一点，刚好套进盖里。外尺寸按盒盖外面算。</span></label>`;
     h += `</div></div>`;
   }
+  if (st.id === 'book') {
+    const dir = c.p.openDir === 'short' ? 'short' : 'long';
+    h += `<div class="sec"><h3>开盒方向</h3><div class="struct-opts">`;
+    h += `<label class="${dir === 'long' ? 'on' : ''}"><input type="radio" name="openDir" value="long" ${dir === 'long' ? 'checked' : ''} hidden/><span class="nm">长边打开</span><span class="hp">像翻书那样，从长的那一边打开；书脊在对面那条长边上。礼盒比较常见这种，也是这里的默认选项。</span></label>`;
+    h += `<label class="${dir === 'short' ? 'on' : ''}"><input type="radio" name="openDir" value="short" ${dir === 'short' ? 'checked' : ''} hidden/><span class="nm">短边打开</span><span class="hp">从短的那一边打开，书脊在对面短边上，像从盒子的短头掀开。</span></label>`;
+    h += `</div></div>`;
+  }
   const vis = paramBlock(st.params, false);
   if (vis) h += `<div class="sec"><h3>这个盒子还可以调</h3>${vis}</div>`;
 
@@ -276,6 +283,7 @@ $('#tabStruct').addEventListener('change', (e) => {
   }
   if (el.name === 'flute') { state.mat.flute = el.value; applyMatChange(); }
   if (el.name === 'lidType') { state.params.lidType = el.value; if (el.value === 'full') delete state.params.lidH; rebuild({ refit: true }); }
+  if (el.name === 'openDir') { state.params.openDir = el.value; rebuild({ refit: true }); }
 });
 $('#tabStruct').addEventListener('click', (e) => {
   const gsmBtn = e.target.closest('button.gsm');
@@ -490,7 +498,7 @@ function infoLines() {
     style: geo.style, dims: state.dims, mat: state.mat, t: state.t, faceT: state.faceT,
     bleed: state.bleed, bbox: geo.bbox, bboxBleed: geo.bboxBleed,
     lamination: state.lamination, finishRegions: state.finishRegions,
-    outer: c.outer, inner: c.inner, lidType: c.p?.lidType,
+    outer: c.outer, inner: c.inner, lidType: c.p?.lidType, openDir: c.p?.openDir,
   });
   const day = new Date();
   const local = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;

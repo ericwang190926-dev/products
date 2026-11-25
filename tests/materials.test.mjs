@@ -253,11 +253,23 @@ test('天地盒 半盖 default lid height is about one third', () => {
   assert.ok(Math.abs(g.ctx.p.lidH - (60 + 2 * 1.9) / 3) < 8 || Math.abs(g.ctx.p.lidH - 60 / 3) < 8, `lidH ${g.ctx.p.lidH} near 1/3`);
 });
 
-test('书型盒 has a front flap and 4 magnet marks (2 on flap, 2 on tray front)', () => {
-  const g = buildGeometry('book', { L: 220, W: 120, H: 60, t: 1.9, wrap: true });
+function checkBookOpening(openDir) {
+  const g = buildGeometry('book', { L: 220, W: 120, H: 60, t: 1.9, wrap: true, params: { openDir } });
+  assert.equal(g.ctx.p.openDir, openDir, `openDir ${openDir}`);
   assert.ok(g.byId.flap && g.byId.flapHinge, 'flap + hinge panels');
   const flap = bbox(g.byId.flap.poly);
+  const lid = bbox(g.byId.lid.poly);
+  const cover = bbox(g.byId.cover.poly);
+  const ov = g.ctx.p.overhang, t = 1.9;
+  const wantLc = g.ctx.A + t + 2 * ov, wantWc = g.ctx.B + t + 2 * ov;
+  const span = openDir === 'short' ? wantWc : wantLc;
+  const leaf = openDir === 'short' ? wantLc : wantWc;
   near(flap.w, g.ctx.p.flapH, 0.05, 'flap height');
+  near(flap.h, span, 0.05, `flap spans the ${openDir} opening edge`);
+  near(lid.w, leaf, 0.05, 'lid depth');
+  near(lid.h, span, 0.05, 'lid along opening');
+  near(cover.w, leaf, 0.05, 'cover depth');
+  near(cover.h, span, 0.05, 'cover along spine');
   const mags = g.marks.filter((m) => m.type === 'magnet');
   assert.equal(mags.length, 4, `got ${mags.length} magnets`);
   for (const m of mags) near(m.r, 6, 1e-6, 'default Ø12 → r=6');
@@ -269,11 +281,30 @@ test('书型盒 has a front flap and 4 magnet marks (2 on flap, 2 on tray front)
   const ys = onFlap.map((m) => m.y).sort((a, b) => a - b);
   near(ys[0], inset, 0.2, 'left inset');
   near(ys[1], flap.h - inset, 0.2, 'right inset');
-  // matching Y on the tray wall
   const tys = onTray.map((m) => m.y).sort((a, b) => a - b);
   near(tys[0], ys[0], 0.2, 'tray matches flap y0');
   near(tys[1], ys[1], 0.2, 'tray matches flap y1');
-  assert.ok(g.sheets.some((s) => s.label === '裱纸（封面）'), 'wrap includes cover');
+  const wrap = g.sheets.find((s) => s.label === '裱纸（封面）');
+  assert.ok(wrap, 'wrap includes cover');
+  const wb = bbox(wrap.poly);
+  assert.ok(wb.h > span, 'cover wrap follows the opening-edge length');
+  assert.ok(g.notes.some((n) => n.includes(openDir === 'short' ? '短边打开' : '长边打开')), 'note names the opening');
+  return g;
+}
+
+test('书型盒 defaults to 长边打开', () => {
+  const g = buildGeometry('book', { L: 220, W: 120, H: 60, t: 1.9 });
+  assert.equal(g.ctx.p.openDir, 'long');
+  const lid = bbox(g.byId.lid.poly);
+  assert.ok(lid.h > lid.w, 'lid is taller along the long opening edge');
+});
+
+test('书型盒 长边打开: flap and magnets sit on the long edge', () => {
+  checkBookOpening('long');
+});
+
+test('书型盒 短边打开: flap and magnets sit on the short edge', () => {
+  checkBookOpening('short');
 });
 
 test('书型盒 magnet diameter and inset are adjustable', () => {
@@ -299,6 +330,25 @@ test('quote lines list 外尺寸 and 内尺寸, 盖型, and 触感膜', () => {
   assert.match(blob, /内尺寸/);
   assert.match(blob, /盖型：全盖/);
   assert.match(blob, /触感膜/);
+});
+
+test('quote lines list 开盒方向 for 书型盒', () => {
+  const style = STYLE_MAP.book;
+  const mat = defaultMaterialFor('book');
+  const { t, faceT } = resolvedThickness(mat);
+  const sizes = resolveBoxDims(style, { ...style.defaults, t, dimMode: 'outer' });
+  const longLines = quoteInfoLines({
+    style, dims: style.defaults, mat, t, faceT, bleed: 3,
+    lamination: 'matte', finishRegions: [],
+    outer: sizes.outer, inner: sizes.inner, openDir: 'long',
+  });
+  assert.match(longLines.join('\n'), /开盒方向：长边打开/);
+  const shortLines = quoteInfoLines({
+    style, dims: style.defaults, mat, t, faceT, bleed: 3,
+    lamination: 'matte', finishRegions: [],
+    outer: sizes.outer, inner: sizes.inner, openDir: 'short',
+  });
+  assert.match(shortLines.join('\n'), /开盒方向：短边打开/);
 });
 
 test('书型盒 PDF has a 磁铁位置 layer', async () => {
