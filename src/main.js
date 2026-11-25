@@ -385,14 +385,38 @@ function demoArtwork() {
   state.elements = state.elements.filter(() => false);
   const logo = makeLogo('BC', '#ff7a1a');
   const fronts = geo.faces.map((f) => f.id);
+  const logoFaces = new Set(['front', 'top', 'header']);
+  const logos = [];
   for (const fid of fronts) {
     const f = faceInfo(fid);
-    const big = fid === 'front' || fid === 'top' || fid === 'header';
-    state.elements.push({ id: 'e' + uid++, type: 'text', face: fid, text: fid === 'front' ? 'BestClean\n声波电动牙刷' : 'BestClean', size: Math.max(2.5, Math.min(f.w, f.h) * (big ? 0.12 : 0.16)), color: fid === 'front' ? '#ffffff' : '#0f4c9c', bold: true, x: 0, y: fid === 'front' ? f.h * 0.22 : 0, rot: f.w < f.h && !big ? -90 : 0 });
+    const big = logoFaces.has(fid);
+    const short = Math.min(f.w, f.h);
+    const text = fid === 'front' ? 'BestClean\n声波电动牙刷' : 'BestClean';
+    const lines = text.split('\n').length;
+    const size = Math.max(2.5, short * (big ? 0.1 : 0.14));
+    const textH = lines * size * 1.25;
+    const rot = f.w < f.h && !big ? -90 : 0;
+    let textY = 0, logoY = 0, logoW = 0;
+    if (big) {
+      logoW = Math.min(short * 0.28, f.h * 0.30, f.w * 0.32);
+      const minGap = Math.max(4, short * 0.07);
+      if (logoW + minGap + textH > f.h * 0.92) logoW = Math.max(8, f.h * 0.92 - minGap - textH);
+      const packed = logoW + minGap + textH;
+      if (f.h > packed * 1.6) {
+        logoY = -Math.min(f.h * 0.20, f.h / 2 - logoW / 2 - 4);
+        textY = Math.min(f.h * 0.18, f.h / 2 - textH / 2 - 4);
+      }
+      if (!(f.h > packed * 1.6) || textY - textH / 2 - (logoY + logoW / 2) < minGap) {
+        logoY = -packed / 2 + logoW / 2;
+        textY = packed / 2 - textH / 2;
+      }
+    }
+    state.elements.push({ id: 'e' + uid++, type: 'text', face: fid, text, size, color: fid === 'front' ? '#ffffff' : '#0f4c9c', bold: true, x: 0, y: textY, rot });
+    if (big) logos.push({ fid, logoW, logoY });
   }
   const im = new Image(); im.onload = () => {
     imageCache.set(logo, im);
-    for (const fid of fronts.filter((q) => ['front', 'top', 'header'].includes(q))) { const f = faceInfo(fid); const w = Math.min(f.w, f.h) * 0.5; state.elements.push({ id: 'e' + uid++, type: 'image', face: fid, src: logo, name: 'logo.png', ratio: 1, x: 0, y: fid === 'front' ? -f.h * 0.12 : 0, w, rot: 0 }); }
+    for (const { fid, logoW, logoY } of logos) state.elements.push({ id: 'e' + uid++, type: 'image', face: fid, src: logo, name: 'logo.png', ratio: 1, x: 0, y: logoY, w: logoW, rot: 0 });
     renderArtPanel(); artChanged();
   };
   im.src = logo; renderArtPanel(); artChanged();

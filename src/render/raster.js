@@ -75,21 +75,59 @@ export function renderFlat(geo, state, { ppm = 4, lines = false, maxPx = 4096, b
 }
 
 
-const FOIL_HEX = { 'foil-gold': '#d4a017', 'foil-silver': '#c5c8cc' };
+const FOIL_HEX = { 'foil-gold': '#e8c04a', 'foil-silver': '#d8dbe0' };
 
-function eachProcPoly(geo, state, fn) {
-  const by = regionsByProcess(state, geo);
-  for (const [id, items] of Object.entries(by)) for (const it of items) fn(id, it.poly);
+/** Alpha mask of a logo; optional knockout of near-white ink so foil leaves lettering as paper. */
+function logoMask(im, knockoutWhite = false) {
+  const oc = document.createElement('canvas');
+  oc.width = im.naturalWidth; oc.height = im.naturalHeight;
+  const ox = oc.getContext('2d');
+  ox.drawImage(im, 0, 0);
+  if (knockoutWhite) {
+    const data = ox.getImageData(0, 0, oc.width, oc.height); const d = data.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 16 || (d[i] > 225 && d[i + 1] > 225 && d[i + 2] > 225)) d[i + 3] = 0;
+    }
+    ox.putImageData(data, 0, 0);
+  }
+  return oc;
+}
+
+/** Paint a finish into ctx (already in mm space). Image-linked regions follow logo alpha, not the bounding square. */
+export function stampFinish(ctx, geo, state, item, style, { knockoutWhite = false } = {}) {
+  const r = item.region || {};
+  const el = r.type === 'el' ? (state.elements || []).find((e) => e.id === r.elementId) : null;
+  const im = el?.type === 'image' ? getImage(el) : null;
+  const f = el ? faceOf(geo, el.face) : null;
+  if (im && f && im.naturalWidth) {
+    const ih = (el.w * im.naturalHeight) / im.naturalWidth;
+    const mask = logoMask(im, knockoutWhite);
+    const oc = document.createElement('canvas');
+    oc.width = im.naturalWidth; oc.height = im.naturalHeight;
+    const ox = oc.getContext('2d');
+    ox.fillStyle = style; ox.fillRect(0, 0, oc.width, oc.height);
+    ox.globalCompositeOperation = 'destination-in';
+    ox.drawImage(mask, 0, 0);
+    ctx.save();
+    ctx.translate(f.cx, f.cy); ctx.rotate((f.rot * Math.PI) / 180);
+    ctx.translate(el.x, el.y); ctx.rotate((el.rot * Math.PI) / 180);
+    ctx.drawImage(oc, -el.w / 2, -ih / 2, el.w, ih);
+    ctx.restore();
+    return;
+  }
+  const poly = item.poly; if (!poly) return;
+  ctx.save(); ctx.fillStyle = style; ctx.beginPath();
+  poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+  ctx.closePath(); ctx.fill(); ctx.restore();
 }
 
 /** Overlay foil colours onto an artwork canvas already transformed to mm space. */
 export function paintFinishColor(ctx, geo, state) {
-  eachProcPoly(geo, state, (id, poly) => {
-    const hex = FOIL_HEX[id]; if (!hex) return;
-    ctx.save(); ctx.fillStyle = hex; ctx.beginPath();
-    poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
-    ctx.closePath(); ctx.fill(); ctx.restore();
-  });
+  const by = regionsByProcess(state, geo);
+  for (const [id, items] of Object.entries(by)) {
+    const hex = FOIL_HEX[id]; if (!hex) continue;
+    for (const it of items) stampFinish(ctx, geo, state, it, hex, { knockoutWhite: true });
+  }
 }
 
 /** PBR maps (roughness / metalness / bump) in the same frame as the artwork texture. */
@@ -112,19 +150,25 @@ export function renderFinishMaps(geo, state, { ppm = 4, maxPx = 2048 } = {}) {
   const [roughCv, rough] = make(`rgb(${baseR},${baseR},${baseR})`);
   const [metalCv, metal] = make('#000');
   const [bumpCv, bump] = make('#808080');
-  const fillPolys = (ctx, polys, style) => {
-    ctx.fillStyle = style; ctx.beginPath();
-    for (const poly of polys) { poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); }
-    ctx.fill();
-  };
+  const [coatCv, coat] = make('#000');
+  const stamp = (ctx, items, style, opts) => { for (const it of items) stampFinish(ctx, geo, state, it, style, opts); };
   const by = regionsByProcess(state, geo);
-  if (by.uv) fillPolys(rough, by.uv.map((x) => x.poly), '#0a0a0a');
-  if (by['reverse-uv']) fillPolys(rough, by['reverse-uv'].map((x) => x.poly), '#d0d0d0');
-  if (by['foil-gold']) { fillPolys(metal, by['foil-gold'].map((x) => x.poly), '#fff'); fillPolys(rough, by['foil-gold'].map((x) => x.poly), '#3a3a3a'); }
-  if (by['foil-silver']) { fillPolys(metal, by['foil-silver'].map((x) => x.poly), '#fff'); fillPolys(rough, by['foil-silver'].map((x) => x.poly), '#2a2a2a'); }
-  if (by.emboss) fillPolys(bump, by.emboss.map((x) => x.poly), '#d0d0d0');
-  if (by.deboss) fillPolys(bump, by.deboss.map((x) => x.poly), '#404040');
-  if (by.sculpt) fillPolys(bump, by.sculpt.map((x) => x.poly), '#f2f2f2');
-  return { roughness: roughCv, metalness: metalCv, bump: bumpCv, ppm, hasFinish: used.length > 0 || lam !== 'none', hasSculpt: !!by.sculpt, hasUV: hasUV || hasRev || lam === 'gloss' };
+  // Spot UV: keep the printed colour; only lower roughness + add clearcoat (no albedo fill).
+  if (by.uv) { stamp(rough, by.uv, '#141414'); stamp(coat, by.uv, '#fff'); }
+  // Reverse UV: flood gloss, matte only in marked regions
+  if (hasRev) {
+    coat.save(); coat.setTransform(1, 0, 0, 1, 0, 0); coat.fillStyle = '#fff'; coat.fillRect(0, 0, coat.canvas.width, coat.canvas.height); coat.restore();
+    if (by['reverse-uv']) { stamp(rough, by['reverse-uv'], '#d0d0d0'); stamp(coat, by['reverse-uv'], '#000'); }
+  }
+  if (by['foil-gold']) { stamp(metal, by['foil-gold'], '#fff', { knockoutWhite: true }); stamp(rough, by['foil-gold'], '#161616', { knockoutWhite: true }); }
+  if (by['foil-silver']) { stamp(metal, by['foil-silver'], '#fff', { knockoutWhite: true }); stamp(rough, by['foil-silver'], '#141414', { knockoutWhite: true }); }
+  if (by.emboss) stamp(bump, by.emboss, '#d0d0d0');
+  if (by.deboss) stamp(bump, by.deboss, '#404040');
+  if (by.sculpt) stamp(bump, by.sculpt, '#f2f2f2');
+  const hasBump = !!(by.emboss || by.deboss || by.sculpt);
+  const hasMetal = !!(by['foil-gold'] || by['foil-silver']);
+  const hasCoat = hasUV || hasRev;
+  return { roughness: roughCv, metalness: metalCv, bump: bumpCv, clearcoat: coatCv, ppm,
+    hasFinish: used.length > 0 || lam !== 'none', hasSculpt: !!by.sculpt, hasUV: hasCoat || lam === 'gloss', hasBump, hasMetal, hasCoat };
 }
 

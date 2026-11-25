@@ -1,6 +1,7 @@
 // three.js preview: every panel is a mesh folded about its hinge; artwork comes from the flat raster.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { computeFold, foldedBBox } from '../core/fold.js';
 import { centroid, bbox } from '../core/geom.js';
 import { renderFlat, renderFinishMaps } from '../render/raster.js';
@@ -9,13 +10,22 @@ export function createView3D(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
   container.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(35, 1, 1, 10000);
   const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.dampingFactor = 0.1; controls.addEventListener('start', () => (userMoved = true));
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa0aa, 1.9));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); scene.add(sun); scene.add(sun.target);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.5); scene.add(fill);
+  // IBL so metallic foil has something to reflect (without an env map, metalness=1 looks black).
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envScene = new RoomEnvironment();
+  scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+  scene.environmentIntensity = 1.05;
+  envScene.dispose();
+  pmrem.dispose();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa0aa, 1.15));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.15); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); scene.add(sun); scene.add(sun.target);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.4); scene.add(fill);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.16 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
   const root = new THREE.Group(); scene.add(root);
   let geo = null, meshes = [], tex = null, maskTex = null, fold = 1, open = 0, radius = 100, center0 = new THREE.Vector3(), viewM = new THREE.Matrix4();
@@ -84,16 +94,25 @@ export function createView3D(container) {
     backMat.color.set(state.boardColor); bulgeBack.color.set(state.boardColor); bulgeBack.alphaMap = maskTex; bulgeBack.needsUpdate = true; bulgeFront.alphaMap = maskTex;
     const maps = renderFinishMaps(geo, state, { ppm, maxPx: 2048 });
     const asTex = (cv) => { const t2 = new THREE.CanvasTexture(cv); t2.colorSpace = THREE.NoColorSpace; t2.anisotropy = tex.anisotropy; return t2; };
+    const lam = state.lamination || 'none';
     for (const mat of [frontMat, bulgeFront]) {
-      mat.roughnessMap?.dispose(); mat.metalnessMap?.dispose(); mat.bumpMap?.dispose();
+      mat.roughnessMap?.dispose(); mat.metalnessMap?.dispose(); mat.bumpMap?.dispose(); mat.clearcoatMap?.dispose();
       if (maps.hasFinish) {
         mat.roughnessMap = asTex(maps.roughness); mat.roughness = 1;
-        mat.metalnessMap = asTex(maps.metalness); mat.metalness = 1;
-        mat.bumpMap = asTex(maps.bump); mat.bumpScale = maps.hasSculpt ? 1.1 : 0.45;
-        mat.clearcoat = maps.hasUV ? 0.55 : (state.lamination === 'matte' ? 0 : 0.08);
-        mat.clearcoatRoughness = state.lamination === 'matte' ? 0.5 : 0.12;
+        // metalness only where the map is white (foil). Without IBL this used to render as a black rectangle.
+        if (maps.hasMetal) { mat.metalnessMap = asTex(maps.metalness); mat.metalness = 1; mat.envMapIntensity = 1.25; }
+        else { mat.metalnessMap = null; mat.metalness = 0; mat.envMapIntensity = 1; }
+        if (maps.hasBump) { mat.bumpMap = asTex(maps.bump); mat.bumpScale = maps.hasSculpt ? 1.1 : 0.45; }
+        else { mat.bumpMap = null; mat.bumpScale = 0; }
+        if (maps.hasCoat) {
+          mat.clearcoatMap = asTex(maps.clearcoat); mat.clearcoat = 1; mat.clearcoatRoughness = 0.1;
+        } else if (lam === 'gloss') {
+          mat.clearcoatMap = null; mat.clearcoat = 0.4; mat.clearcoatRoughness = 0.16;
+        } else {
+          mat.clearcoatMap = null; mat.clearcoat = 0; mat.clearcoatRoughness = lam === 'matte' ? 0.5 : 0.25;
+        }
       } else {
-        mat.roughnessMap = null; mat.metalnessMap = null; mat.bumpMap = null;
+        mat.roughnessMap = null; mat.metalnessMap = null; mat.bumpMap = null; mat.clearcoatMap = null;
         mat.roughness = 0.55; mat.metalness = 0; mat.bumpScale = 0; mat.clearcoat = 0;
       }
       mat.needsUpdate = true;

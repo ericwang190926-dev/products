@@ -80,13 +80,14 @@ await page.click('#propTabs button[data-tab="art"]'); await page.waitForTimeout(
 await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
 await page.evaluate(() => {
   const st = window.__app.state;
-  const logo = st.elements.find((e) => e.type === 'image' && e.face === 'front') || st.elements.find((e) => e.type === 'image');
-  if (logo) {
-    st.selected = logo.id;
-    st.finishRegions = [{ id: 'fdemo', type: 'el', elementId: logo.id, processes: ['foil-gold', 'uv'] }];
-    st.lamination = 'matte';
-    st.selectedFinish = 'fdemo';
-  }
+  const frontLogo = st.elements.find((e) => e.type === 'image' && e.face === 'front');
+  const topLogo = st.elements.find((e) => e.type === 'image' && e.face === 'top');
+  st.finishRegions = [];
+  if (topLogo) st.finishRegions.push({ id: 'fdemo', type: 'el', elementId: topLogo.id, processes: ['foil-gold'] });
+  if (frontLogo) st.finishRegions.push({ id: 'fuv', type: 'el', elementId: frontLogo.id, processes: ['uv'] });
+  st.lamination = 'matte';
+  st.selectedFinish = st.finishRegions[0]?.id || null;
+  st.selected = (topLogo || frontLogo)?.id || null;
 });
 await page.evaluate(() => window.__app.refresh()); await page.waitForTimeout(400);
 await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeout(200);
@@ -94,10 +95,10 @@ await page.evaluate(() => { const el = document.querySelector('.sec h3 .tip') ||
 await page.waitForTimeout(200);
 await page.locator('#props').screenshot({ path: `${SHOTS}/finish_ui.png` });
 await page.click('#propTabs button[data-tab="art"]');
-await setMode('3d'); await setFold(1, 0.55); await page.waitForTimeout(600);
+await setMode('3d'); await setFold(1, 0.12); await page.waitForTimeout(600);
 await page.locator('#v3d').screenshot({ path: `${SHOTS}/finish_3d.png` });
 await setMode('split');
-ok('finish processes attach to artwork', await page.evaluate(() => (window.__app.state.finishRegions[0]?.processes || []).includes('foil-gold')));
+ok('finish processes attach to artwork', await page.evaluate(() => { const regs = window.__app.state.finishRegions || []; return regs.some((r) => (r.processes || []).includes('foil-gold')) && regs.some((r) => (r.processes || []).includes('uv')); }));
 await page.click('.card[data-id="hanger"]'); await page.waitForTimeout(400);
 await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(500);
 
