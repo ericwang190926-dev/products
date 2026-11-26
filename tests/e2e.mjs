@@ -301,7 +301,9 @@ await page.fill('input[data-param="insCardLift"]', '6'); await page.waitForTimeo
 ok('纸卡离盒底高度', await page.evaluate(() => window.__app.geo.insertSpec.cardLift === 6));
 await page.fill('input[data-param="insCardLift"]', ''); await page.waitForTimeout(600);
 
-// 固定一组 3 个自定义槽：EVA 3D、纸卡刀版、2D 拖动
+// 固定一组 3 个自定义槽：EVA 3D、纸卡刀版、2D 拖动（用书型盒：盖子翻开后能直接看到内衬）
+await page.click('#propTabs button[data-tab="struct"]'); await page.click('.card[data-id="book"]'); await page.waitForTimeout(500);
+await page.evaluate(() => { window.__app.state.params = { insertType: 'eva' }; window.__app.rebuild(); }); await page.waitForTimeout(500);
 await page.evaluate(() => {
   const a = window.__app; const sp = a.geo.insertSpec; const L = sp.insL, W = sp.insW;
   a.state.params.insSlots = [
@@ -322,7 +324,7 @@ await setMode('3d'); await setFold(1, 1); await page.waitForTimeout(700);
 {
   const vb = await page.locator('#v3d').boundingBox();
   await page.mouse.move(vb.x + vb.width * 0.5, vb.y + vb.height * 0.45); await page.mouse.down();
-  for (let i = 1; i <= 10; i++) { await page.mouse.move(vb.x + vb.width * 0.5, vb.y + vb.height * 0.45 + i * 9); await page.waitForTimeout(25); }
+  for (let i = 1; i <= 10; i++) { await page.mouse.move(vb.x + vb.width * 0.5, vb.y + vb.height * 0.45 + i * 2); await page.waitForTimeout(25); }
   await page.mouse.up(); await page.waitForTimeout(600);
 }
 await page.locator('#v3d').screenshot({ path: `${SHOTS}/eva_custom_slots_3d.png` });
@@ -331,18 +333,17 @@ await page.locator('#resetView').click(); await page.waitForTimeout(200);
 await page.click('#propTabs button[data-tab="struct"]');
 await page.click('[data-insert-type="card"]'); await page.waitForTimeout(600);
 await setMode('2d'); await page.waitForTimeout(500);
-const zoomToInsert = async (steps = 6) => {
-  const pt = await page.evaluate(() => {
+const zoomToInsert = async () => {
+  await page.evaluate(() => {
     const sp = window.__app.geo.insertSpec; const svg = document.querySelector('#svg2d');
-    const p = svg.createSVGPoint(); p.x = sp.edit.ox + sp.insL / 2; p.y = sp.edit.oy + sp.insW / 2;
-    const q = p.matrixTransform(svg.getScreenCTM()); return { x: q.x, y: q.y };
+    const r = svg.getBoundingClientRect(); const cx = sp.edit.ox + sp.insL / 2, cy = sp.edit.oy + sp.insW / 2;
+    const w = sp.insL * 1.5, h = w * r.height / r.width;
+    svg.setAttribute('viewBox', `${cx - w / 2} ${cy - h / 2} ${w} ${h}`);
   });
-  await page.mouse.move(pt.x, pt.y);
-  for (let i = 0; i < steps; i++) { await page.mouse.wheel(0, -120); await page.waitForTimeout(30); }
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(300);
 };
 const settle = async () => { await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))); await page.waitForTimeout(350); };
-await zoomToInsert(6); await settle();
+await zoomToInsert(); await settle();
 await page.screenshot({ path: `${SHOTS}/card_slots_dieline.png`, clip: await page.locator('#v2d').boundingBox() });
 ok('纸卡刀版带 3 个自定义槽孔', await page.evaluate(() => window.__app.geo.byId.insCard.holes.length === 3 && window.__app.geo.cut.length > 0));
 
