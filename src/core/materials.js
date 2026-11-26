@@ -1,4 +1,4 @@
-import { insertSummaryLine, sleeveInnerSummaryLine } from './insert.js';
+import { insertSummaryLines, sleeveInnerSummaryLine } from './insert.js';
 /**
  * Material model aimed at sales / merchandisers, not converters.
  *
@@ -254,8 +254,7 @@ export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBl
   if (mat.structure === 'rigid') {
     lines.push(`裱纸包边 ${mat.turnIn ?? 15} mm，面纸厚约${(faceT ?? faceThickness(mat)).toFixed(2)}mm`);
   }
-  const insLine = insertSummaryLine(insertSpec);
-  if (insLine) lines.push(insLine);
+  lines.push(...insertSummaryLines(insertSpec));
   lines.push(finishSummary(lamination, finishRegions));
   if (bbox) lines.push(`展开尺寸 ${bbox.w.toFixed(1)} × ${bbox.h.toFixed(1)} mm` + (bboxBleed ? `（含多印边 ${bboxBleed.w.toFixed(1)} × ${bboxBleed.h.toFixed(1)}）` : ''));
   if (bleed != null) lines.push(`多印边（出血） ${bleed} mm；刀线专色 CutContour，压痕专色 Crease` + processSpotNote(finishRegions));
