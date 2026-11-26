@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/geometry.test.mjs tests/materials.test.mjs tests/fold.test.mjs",
+    "test": "node --test tests/geometry.test.mjs tests/materials.test.mjs tests/fold.test.mjs tests/slots.test.mjs",
     "build": "vite build",
     "dev": "vite",
     "test:e2e": "vite build && node tests/e2e.mjs",
