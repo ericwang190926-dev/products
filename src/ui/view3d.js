@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { computeFold, foldedBBox } from '../core/fold.js';
-import { centroid, bbox } from '../core/geom.js';
+import { centroid, bbox, outsetPoly } from '../core/geom.js';
 import { renderFlat, renderFinishMaps } from '../render/raster.js';
 
 export function createView3D(container) {
@@ -78,7 +78,7 @@ export function createView3D(container) {
     const useSleeveGhost = geo.style?.id === 'sleeve' && !!state.sleeveGhost;
     for (const p of geo.panels) {
       let sg;
-      if (p.bulge) sg = bulgeGeometry(p, bb); else { sg = new THREE.ShapeGeometry(shapeOf(p.poly, p.holes)); uvFor(sg, bb); }
+      if (p.bulge) sg = bulgeGeometry(p, bb); else { sg = new THREE.ShapeGeometry(shapeOf(outsetPoly(p.poly, 0.7), p.holes)); uvFor(sg, bb); }
       const isGhost = useSleeveGhost && p.part !== 'tray' && p.part !== 'insert';
       const fm = p.bulge ? bulgeFront : isGhost ? ghostFront : frontMat;
       const bm = p.bulge ? bulgeBack : isGhost ? ghostBack : backMat;

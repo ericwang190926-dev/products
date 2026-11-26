@@ -154,6 +154,32 @@ ok('书型盒 短边打开 moves flap to the short edge', await page.evaluate(()
 }));
 ok('覆膜 options include 触感膜', await page.evaluate(() => /触感膜/.test(document.body.innerText)));
 
+// Closed corners at fold=100% (thickness-aware joints)
+const shot3d = async (id, file, open = 0) => {
+  await page.evaluate(() => { window.__app.state.materialTouched = false; window.__app.state.dimsTouched = false; window.__app.state.params = {}; });
+  await page.click('#propTabs button[data-tab="struct"]');
+  await page.click(`.card[data-id="${id}"]`); await page.waitForTimeout(350);
+  if (await page.locator('#useDefaults').count()) { try { await page.click('#useDefaults', { timeout: 800 }); } catch {} }
+  await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(550);
+  await setMode('3d'); await setFold(1, open); await page.waitForTimeout(450);
+  await page.locator('#v3d').screenshot({ path: `${SHOTS}/${file}` });
+};
+await shot3d('lidbase', 'lidbase_corners_3d.png', 0.35);
+{
+  const box = await page.locator('#v3d').boundingBox();
+  await page.mouse.move(box.x + box.width * 0.68, box.y + box.height * 0.40);
+  for (let i = 0; i < 10; i++) { await page.mouse.wheel(0, -90); await page.waitForTimeout(40); }
+  await page.waitForTimeout(250);
+  await page.locator('#v3d').screenshot({ path: `${SHOTS}/lidbase_corners_closeup.png` });
+  await page.locator('button:has-text("重置视角")').click(); await page.waitForTimeout(200);
+}
+await shot3d('drawer', 'drawer_corners_3d.png', 0);
+await shot3d('book', 'book_corners_3d.png', 0);
+await shot3d('sleeve', 'sleeve_corners_3d.png', 0.35);
+await shot3d('ste', 'ste_corners_3d.png', 0);
+ok('corner close-up screenshots saved', ['lidbase_corners_closeup','lidbase_corners_3d','drawer_corners_3d','book_corners_3d','sleeve_corners_3d','ste_corners_3d'].every((n) => fs.existsSync(`${SHOTS}/${n}.png`) && fs.statSync(`${SHOTS}/${n}.png`).size > 20000));
+
+
 // 封套盒 inner box (rigid + folding) + 内衬 (EVA / 吸塑 / 纸盒 / 纸卡)
 await page.evaluate(() => { window.__app.state.materialTouched = false; window.__app.state.dimsTouched = false; window.__app.state.dimMode = 'outer'; window.__app.state.params = {}; });
 await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeout(200);

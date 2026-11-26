@@ -7,6 +7,7 @@ import { Vector3 } from 'three';
 import { STYLES, STYLE_MAP } from '../src/core/styles/index.js';
 import { buildGeometry } from '../src/core/model.js';
 import { computeFold, to3 } from '../src/core/fold.js';
+import { rect, outsetPoly, bbox, area } from '../src/core/geom.js';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: got ${a.toFixed(4)} expected ${b.toFixed(4)} (tol ${tol})`);
 
@@ -181,4 +182,14 @@ test('midplane fold (thickness:false) still leaves the classic t·sin(θ/2) gap'
   const mats = computeFold(geo, { progress: 1, open: 0, thickness: false });
   const gap = hingePrintedGap(geo, mats, geo.byId.front);
   near(gap, 1.9 * Math.sin(Math.PI / 4), 0.02, 'uncompensated 90° gap');
+});
+
+test('outsetPoly expands a rectangle by the given margin', () => {
+  const o = outsetPoly(rect(0, 0, 100, 100).poly, 2);
+  const b = bbox(o);
+  near(b.x, -2, 1e-6, 'outset x');
+  near(b.y, -2, 1e-6, 'outset y');
+  near(b.w, 104, 1e-6, 'outset w');
+  near(b.h, 104, 1e-6, 'outset h');
+  assert.ok(area(o) > 10000, 'area grows');
 });

@@ -20,6 +20,23 @@ export function rect(x, y, w, h) {
   return { x, y, w, h, poly: [tl, tr, br, bl], top: [tl, tr], right: [tr, br], bottom: [br, bl], left: [bl, tl], cx: x + w / 2, cy: y + h / 2 };
 }
 export const outward = (e) => { const d = norm(sub(e[1], e[0])); return [d[1], -d[0]]; };
+/** Expand (dist>0) or shrink a closed polygon along its outward normals, with mitered joins. */
+export function outsetPoly(poly, dist) {
+  const n = poly.length;
+  if (n < 3 || !dist) return poly;
+  const ns = [];
+  for (let i = 0; i < n; i++) ns.push(outward([poly[i], poly[(i + 1) % n]]));
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const n0 = ns[(i - 1 + n) % n], n1 = ns[i];
+    let nx = n0[0] + n1[0], ny = n0[1] + n1[1];
+    const l = Math.hypot(nx, ny) || 1;
+    nx /= l; ny /= l;
+    const miter = dist / Math.max(0.25, n1[0] * nx + n1[1] * ny);
+    out.push([poly[i][0] + nx * miter, poly[i][1] + ny * miter]);
+  }
+  return out;
+}
 export const edgeLen = (e) => dist(e[0], e[1]);
 export const rev = (e) => [e[1], e[0]];
 /** Sub-segment of an edge from distance a to distance b along it. */
