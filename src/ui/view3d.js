@@ -96,11 +96,12 @@ export function createView3D(container) {
         side: THREE.DoubleSide, depthWrite: e.opacity >= 1,
       });
       const outer = [[-e.L / 2, -e.W / 2], [e.L / 2, -e.W / 2], [e.L / 2, e.W / 2], [-e.L / 2, e.W / 2]];
-      const flangeG = new THREE.ExtrudeGeometry(shapeOf(outer, e.slots.map((s) => s.poly), true), { depth: 0.6, bevelEnabled: false });
+      const sheet = Math.max(0.2, e.sheet || 0.6);
+      const flangeG = new THREE.ExtrudeGeometry(shapeOf(outer, e.slots.map((s) => s.poly), true), { depth: sheet, bevelEnabled: false });
       const flangeM = new THREE.Mesh(flangeG, mat);
       grp.add(flangeM);
-      const wallD = Math.max(1, e.depth - 0.3);
       for (const s of e.slots) {
+        const wallD = Math.max(1, (s.depth || e.depth) - sheet / 2);
         const botG = new THREE.ShapeGeometry(shapeOf(s.poly));
         botG.translate(0, 0, wallD);
         grp.add(new THREE.Mesh(botG, mat));
@@ -124,8 +125,18 @@ export function createView3D(container) {
       if (e.type === 'blister') { const eg = new THREE.ExtrudeGeometry(shapeOf(e.poly), { depth: e.depth, bevelEnabled: true, bevelThickness: Math.min(4, e.depth * 0.3), bevelSize: 2, bevelSegments: 4 }); m = new THREE.Mesh(eg, new THREE.MeshPhysicalMaterial({ color: 0xf2f8ff, transparent: true, opacity: 0.28, roughness: 0.08, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false })); }
       if (e.type === 'insert-eva') {
         const outer = [[-e.L / 2, -e.W / 2], [e.L / 2, -e.W / 2], [e.L / 2, e.W / 2], [-e.L / 2, e.W / 2]];
-        const eg = new THREE.ExtrudeGeometry(shapeOf(outer, e.holes || [], true), { depth: e.depth, bevelEnabled: false });
-        m = new THREE.Mesh(eg, new THREE.MeshStandardMaterial({ color: e.color, roughness: 0.92, metalness: 0.02 }));
+        const evaMat = new THREE.MeshStandardMaterial({ color: e.color, roughness: 0.92, metalness: 0.02 });
+        // local z = 0 is the open top, z = depth sits on the box floor. A slot of depth d removes z ∈ [0, d].
+        const slotsE = e.slots || (e.holes || []).map((poly) => ({ poly, depth: e.depth }));
+        const cuts = [...new Set([0, e.depth, ...slotsE.map((q) => Math.min(e.depth, q.depth))].map((v) => Math.round(v * 1000) / 1000))].sort((a, b) => a - b);
+        m = new THREE.Group();
+        for (let i = 0; i < cuts.length - 1; i++) {
+          const za = cuts[i], zb = cuts[i + 1];
+          const holes = slotsE.filter((q) => q.depth >= zb - 1e-6).map((q) => q.poly);
+          const g = new THREE.ExtrudeGeometry(shapeOf(outer, holes, true), { depth: zb - za, bevelEnabled: false });
+          g.translate(0, 0, za);
+          const part = new THREE.Mesh(g, evaMat); part.castShadow = true; m.add(part);
+        }
         localM = new THREE.Matrix4().makeTranslation(e.cx, -e.cy, -(e.baseT / 2 + e.depth));
         if (e.rotated) localM.multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
       }

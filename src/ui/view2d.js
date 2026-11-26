@@ -58,6 +58,19 @@ export function createView2D(svg, hooks) {
       for (const sh of insSheets) o += `<path d="${ringsD([sh.poly, ...(sh.holes || [])])}" fill="${sh.fill || '#23262d'}" fill-opacity="${sh.kind === 'blister' ? 0.14 : 0.16}" fill-rule="evenodd" stroke="none"/>`;
       o += `</g>`;
     }
+    const insEdit = geo.insertSpec?.edit;
+    if (insEdit && geo.insertSpec.slots.length) {
+      const sp = geo.insertSpec; const sel = s.selectedSlot ?? 0;
+      o += `<g id="lyr-slots">`;
+      sp.slots.forEach((sl, i) => {
+        const d = ringsD([sl.poly.map((q) => [q[0] + insEdit.ox, q[1] + insEdit.oy])]);
+        const on = i === sel;
+        o += `<path data-slot="${i}" d="${d}" fill="${on ? 'rgba(31,111,235,0.16)' : 'rgba(31,111,235,0.03)'}" stroke="${on ? '#1f6feb' : '#6b8fd6'}" stroke-width="${on ? 1.8 : 0.8}" vector-effect="non-scaling-stroke" stroke-dasharray="${on ? '' : '2 2'}" style="cursor:grab"/>`;
+      });
+      const cur = sp.slots[Math.min(sel, sp.slots.length - 1)];
+      if (cur) o += `<g pointer-events="none" stroke="#1f6feb" stroke-width="1" vector-effect="non-scaling-stroke"><path d="M${f(insEdit.ox + cur.x - 2.5)} ${f(insEdit.oy + cur.y)}h5M${f(insEdit.ox + cur.x)} ${f(insEdit.oy + cur.y - 2.5)}v5" fill="none" vector-effect="non-scaling-stroke"/></g>`;
+      o += `</g>`;
+    }
     o += `<g id="lyr-glue" ${L.glue ? '' : 'display="none"'}>${geo.glue.map((g2) => `<path d="${ringsD([g2])}" fill="url(#hatch)" pointer-events="none"/>`).join('')}</g>`;
     if (L.finish !== false) {
       o += `<g id="lyr-finish" pointer-events="none">`;
@@ -137,6 +150,15 @@ export function createView2D(svg, hooks) {
   svg.addEventListener('pointerdown', (e) => {
     const elNode = e.target.closest('[data-el]');
     const start = toMM(e);
+    const slotNode = e.target.closest('[data-slot]');
+    if (slotNode && !state.drawFinish && geo.insertSpec?.edit) {
+      const i = +slotNode.getAttribute('data-slot'); const sl = geo.insertSpec.slots[i];
+      hooks.slotSelect?.(i);
+      drag = { type: 'slot', idx: i, start, x0: sl.x, y0: sl.y, x: sl.x, y: sl.y, node: slotNode, moved: false };
+      svg.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
     if (state.drawFinish) {
       const fc = faceAtPoint(geo, start[0], start[1]) || (state.selectedFace && geo.faces.find((q) => q.id === state.selectedFace));
       if (!fc) { drag = { type: 'pan', sx: e.clientX, sy: e.clientY, vb0: { ...vb }, face: null, moved: false }; }
@@ -157,6 +179,26 @@ export function createView2D(svg, hooks) {
   });
   svg.addEventListener('pointermove', (e) => {
     if (!drag) return;
+    if (drag.type === 'slot') {
+      const p = toMM(e); const sp = geo.insertSpec; const ed = sp.edit;
+      const dx = p[0] - drag.start[0], dy = p[1] - drag.start[1];
+      if (!drag.moved && Math.hypot(dx, dy) < 0.6) return;
+      drag.moved = true;
+      const r = svg.getBoundingClientRect(); const tol = (7 * vb.w) / (r.width || 1);
+      const sn = hooks.slotSnap ? hooks.slotSnap(drag.idx, drag.x0 + dx, drag.y0 + dy, tol) : { x: drag.x0 + dx, y: drag.y0 + dy, guides: [] };
+      drag.x = sn.x; drag.y = sn.y;
+      drag.node.setAttribute('transform', `translate(${f(sn.x - drag.x0)} ${f(sn.y - drag.y0)})`);
+      svg.querySelector('#slotGuides')?.remove();
+      let g = `<g id="slotGuides" pointer-events="none" stroke="#e11d8f" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke">`;
+      for (const gd of sn.guides || []) {
+        if (gd.axis === 'x') g += `<line x1="${f(ed.ox + gd.pos)}" x2="${f(ed.ox + gd.pos)}" y1="${f(ed.oy - 4)}" y2="${f(ed.oy + sp.insW + 4)}" vector-effect="non-scaling-stroke"/>`;
+        else g += `<line y1="${f(ed.oy + gd.pos)}" y2="${f(ed.oy + gd.pos)}" x1="${f(ed.ox - 4)}" x2="${f(ed.ox + sp.insL + 4)}" vector-effect="non-scaling-stroke"/>`;
+      }
+      g += `<text x="${f(ed.ox + sn.x + 3)}" y="${f(ed.oy + sn.y - 3)}" font-size="3.2" fill="#e11d8f" stroke="none">X ${f(sn.x)} · Y ${f(sn.y)}</text></g>`;
+      svg.insertAdjacentHTML('beforeend', g);
+      hooks.slotDragging?.(drag.idx, sn.x, sn.y);
+      return;
+    }
     if (drag.type === 'pan') {
       const r = svg.getBoundingClientRect(); const dx = ((e.clientX - drag.sx) * vb.w) / r.width, dy = ((e.clientY - drag.sy) * vb.h) / r.height;
       if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 3) drag.moved = true;
@@ -186,6 +228,12 @@ export function createView2D(svg, hooks) {
   });
   const end = () => {
     if (!drag) return;
+    if (drag.type === 'slot') {
+      svg.querySelector('#slotGuides')?.remove();
+      const d0 = drag; drag = null;
+      hooks.slotCommit?.(d0.idx, d0.moved ? { x: d0.x, y: d0.y } : null);
+      return;
+    }
     if (drag.type === 'el' && drag.moved) hooks.changed();
     if (drag.type === 'pan' && !drag.moved) hooks.select(null, drag.face || null);
     if (drag.type === 'finish') {

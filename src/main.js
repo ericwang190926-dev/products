@@ -12,11 +12,13 @@ import { buildGeometry } from './core/model.js';
 import { FACE_NAMES } from './core/builder.js';
 import {
   INSERT_STYLES, INSERT_TYPES, SLEEVE_INNER_TYPES, EVA_THICKS, EVA_COLORS,
-  BLISTER_COLORS, CAVITY_SHAPES, INSERT_PAPER_KINDS, INSERT_PAPER_GSM,
+  INSERT_PAPER_GSM,
   INNER_GREY_GSM, INNER_WRAP_GSM,
 } from './core/insert.js';
 import { createView2D, elementSize } from './ui/view2d.js';
 import { createView3D } from './ui/view3d.js';
+import { insertPanelHTML } from './ui/insertPanel.js';
+import { addSlot, duplicateSlot, removeSlot, centerSlot, centerAll, distribute, setSpacing, quickArray, snapSlot } from './core/slots.js';
 import { renderFlat, imageCache } from './render/raster.js';
 import { buildPDF } from './export/pdf.js';
 import { buildSVG, buildDXF } from './export/vector.js';
@@ -29,6 +31,7 @@ const state = {
   selectedFinish: null, lamination: 'none', finishRegions: [], drawFinish: false, finishUid: 1, dimMode: 'outer',
   layers: { art: true, cut: true, crease: true, bleed: true, glue: true, dims: true, labels: true, finish: true, magnet: true },
   dimsTouched: false, materialTouched: false, sleeveGhost: false, showMagnets: false,
+  selectedSlot: 0, slotCoord: 'edge', slotGap: 6,
 };
 function syncMaterial() {
   const r = resolvedThickness(state.mat);
@@ -47,6 +50,18 @@ const view2d = createView2D($('#svg2d'), {
   select: (id, face) => { state.selected = id; if (face) state.selectedFace = face; if (id) { const r = state.finishRegions.find((x) => x.type === 'el' && x.elementId === id); state.selectedFinish = r ? r.id : null; } render2D(); renderArtPanel(); renderStruct(); if (face && !id && !state.drawFinish) switchTab('art'); },
   changed: () => { render2D(); scheduleTexture(); renderArtPanel(); },
   dragging: () => scheduleTexture(),
+  slotSelect: (i) => { state.selectedSlot = i; renderStruct(); },
+  slotSnap: (i, x, y, tol) => { const sp = geo.insertSpec; return snapSlot(sp.slots, i, x, y, { L: sp.insL, W: sp.insW }, { tol }); },
+  slotDragging: (i, x, y) => {
+    const sp = geo.insertSpec; const c = state.slotCoord === 'center';
+    const set = (k, v) => { const n = document.querySelector(`#tabStruct input[data-slot="${i}"][data-key="${k}"]`); if (n) n.value = (Math.round(v * 100) / 100).toString(); };
+    set('x', c ? x - sp.insL / 2 : x); set('y', c ? y - sp.insW / 2 : y);
+  },
+  slotCommit: (i, pos) => {
+    if (!pos) { render2D(); return; }
+    const raw = rawSlots(); if (!raw[i]) return;
+    raw[i].x = pos.x; raw[i].y = pos.y; commitSlots(raw);
+  },
   finishRect: (face, x, y, w, h) => {
     const r = { id: 'f' + state.finishUid++, type: 'rect', face, x, y, w, h, rot: 0, processes: ['foil-gold'] };
     state.finishRegions.push(r); state.selectedFinish = r.id; state.drawFinish = false;
@@ -60,6 +75,11 @@ const view3d = createView3D($('#three'));
 let texPending = false;
 function scheduleTexture() { if (texPending) return; texPending = true; requestAnimationFrame(() => { texPending = false; view3d.updateTexture(state); }); }
 function render2D(opts) { view2d.render(geo, state, opts); }
+
+// ---------------- 内衬槽位编辑 ----------------
+const rawSlots = () => (geo.insertSpec?.slots || []).map(({ shape, w, h, r, rot, depth, x, y, notch, notchSide, notchR }) => ({ shape, w, h, r, rot, depth, x, y, notch, notchSide, notchR }));
+const insDims = () => ({ L: geo.insertSpec.insL, W: geo.insertSpec.insW });
+function commitSlots(next) { state.params.insSlots = next; if (state.selectedSlot >= next.length) state.selectedSlot = Math.max(0, next.length - 1); rebuild(); }
 
 function rebuild({ refit = false } = {}) {
   try {
@@ -230,55 +250,7 @@ function renderStruct() {
     }
     h += `</div>`;
   }
-  if (INSERT_STYLES.has(st.id)) {
-    const insType = c.p.insertType || 'none';
-    const spec = geo.insertSpec;
-    h += `<div class="sec" id="insertSec"><h3>${tip('内衬', '放在盒里面固定产品的托盘或隔卡，外尺寸会按盒内空间自动算好。')}</h3>`;
-    h += `<div class="chips" id="insertTypes">`;
-    for (const it of INSERT_TYPES) h += `<span class="chip ${insType === it.id ? 'on' : ''}" data-insert-type="${it.id}" title="${escAttr(it.hint)}">${it.name}</span>`;
-    h += `</div>`;
-    if (spec) {
-      h += `<div class="summary" style="margin-top:8px">内衬外尺寸已自动适配盒内空间：<b>${spec.insL.toFixed(1)} × ${spec.insW.toFixed(1)}</b> mm（盒内深约 ${spec.insH.toFixed(1)} mm）</div>`;
-      if (spec.type === 'eva') {
-        const knownT = EVA_THICKS.includes(+spec.evaThick);
-        h += `<div class="field"><span class="lbl">EVA 厚度 (mm)</span><div class="gsm-picks">`;
-        for (const tv of EVA_THICKS) h += `<button type="button" class="gsm ${+spec.evaThick === tv ? 'on' : ''}" data-eva-thick="${tv}">${tv}mm</button>`;
-        h += `<label class="gsm-custom">其他<input type="number" data-param="evaThick" min="3" max="${Math.max(10, Math.floor(spec.insH))}" step="1" value="${knownT ? '' : spec.evaThick}" placeholder="mm"/></label></div></div>`;
-        h += `<div class="field"><span class="lbl">EVA 颜色</span><div class="chips">`;
-        for (const cl of EVA_COLORS) h += `<span class="chip ${spec.evaColor === cl.id ? 'on' : ''}" data-eva-color="${cl.id}">${cl.name}</span>`;
-        h += `</div></div>`;
-      } else if (spec.type === 'blister') {
-        h += `<div class="field"><span class="lbl">吸塑材质/颜色</span><div class="chips">`;
-        for (const cl of BLISTER_COLORS) h += `<span class="chip ${spec.blisterColor === cl.id ? 'on' : ''}" data-blister-color="${cl.id}">${cl.name}</span>`;
-        h += `</div></div>`;
-        h += `<div class="row"><label>凹槽深度 (mm)</label><input type="number" step="1" min="4" max="${Math.floor(spec.insH)}" data-param="blisterDepth" placeholder="自动 ${spec.blisterDepth.toFixed(0)}" value="${state.params.blisterDepth ?? ''}"/></div>`;
-        h += `<div class="note">提示：吸塑需开吸塑模具成型，导出图纸为外框与凹槽尺寸参考，不作直接裁切刀版。</div>`;
-      } else if (spec.type === 'carton' || spec.type === 'card') {
-        h += `<div class="field"><span class="lbl">内衬用纸</span><div class="chips">`;
-        for (const pk of INSERT_PAPER_KINDS) h += `<span class="chip ${spec.paperKind === pk.id ? 'on' : ''}" data-ins-paper="${pk.id}">${pk.name}</span>`;
-        h += `</div></div>`;
-        h += `<div class="field"><span class="lbl">纸张克重</span>${gsmPicks('insPaperGsm', INSERT_PAPER_GSM, spec.paperGsm, true)}</div>`;
-        if (spec.type === 'carton') {
-          h += `<div class="row"><label>内托高度 (mm)</label><input type="number" step="1" min="6" max="${Math.floor(spec.insH)}" data-param="insPlatH" placeholder="自动 ${spec.platH.toFixed(0)}" value="${state.params.insPlatH ?? ''}"/></div>`;
-        }
-      }
-      h += `<div class="field"><span class="lbl">产品槽位形状</span><div class="chips">`;
-      for (const cs of CAVITY_SHAPES) h += `<span class="chip ${spec.shape === cs.id ? 'on' : ''}" data-ins-shape="${cs.id}">${cs.name}</span>`;
-      h += `</div></div>`;
-      h += `<div class="row"><label>槽位数量</label><input type="number" step="1" min="1" max="12" data-param="insCount" value="${state.params.insCount ?? spec.count}"/></div>`;
-      h += `<div class="field"><span class="lbl">槽位排布</span><div class="chips">`;
-      h += `<span class="chip ${spec.align === 'across' ? 'on' : ''}" data-ins-align="across">居中并排（沿宽分布）</span>`;
-      h += `<span class="chip ${spec.align === 'along' ? 'on' : ''}" data-ins-align="along">居中顺排（沿长分布）</span>`;
-      h += `</div></div>`;
-      if (spec.shape === 'circle') {
-        h += `<div class="row"><label>孔径 Ø (mm)</label><input type="number" step="1" min="4" data-param="insCavL" placeholder="自动 ${spec.cavL.toFixed(0)}" value="${state.params.insCavL ?? ''}"/></div>`;
-      } else {
-        h += `<div class="row"><label>槽长 (mm)</label><input type="number" step="1" min="4" data-param="insCavL" placeholder="自动 ${spec.cavL.toFixed(0)}" value="${state.params.insCavL ?? ''}"/></div>`;
-        h += `<div class="row"><label>槽宽 (mm)</label><input type="number" step="1" min="4" data-param="insCavW" placeholder="自动 ${spec.cavW.toFixed(0)}" value="${state.params.insCavW ?? ''}"/></div>`;
-      }
-    }
-    h += `</div>`;
-  }
+  if (INSERT_STYLES.has(st.id)) h += insertPanelHTML(geo.insertSpec, { state, tip, escAttr, gsmPicks, insType: c.p.insertType || 'none' });
   const vis = paramBlock(st.params, false);
   if (vis) h += `<div class="sec"><h3>这个盒子还可以调</h3>${vis}</div>`;
 
@@ -335,7 +307,16 @@ function renderStruct() {
   h += `切开的线大约 <b>${(cutLen / 1000).toFixed(2)} m</b>，折的线 <b>${(crLen / 1000).toFixed(2)} m</b></div>`;
   for (const n of geo.notes) h += `<div class="note">${n}</div>`;
   h += `</div>`;
+  const ae = document.activeElement; let keepSel = null;
+  if (ae && ae.matches && ae.matches('#tabStruct input')) {
+    const d = ae.dataset;
+    keepSel = d.slot != null && d.key ? `input[data-slot="${d.slot}"][data-key="${d.key}"]` : d.param ? `input[data-param="${d.param}"]` : ae.id ? `#${ae.id}` : null;
+  }
   $('#tabStruct').innerHTML = h;
+  if (keepSel) {
+    const n = $('#tabStruct').querySelector(keepSel);
+    if (n) { n.focus(); try { const t0 = n.type; n.type = 'text'; n.setSelectionRange(n.value.length, n.value.length); n.type = t0; } catch (e) {} }
+  }
   $('#svg2d').classList.toggle('draw-finish', !!state.drawFinish);
 }
 let dimTimer;
@@ -362,6 +343,18 @@ $('#tabStruct').addEventListener('input', (e) => {
     else if (el.id === 'turnIn') { const v = num(el.value); if (v && v > 0) { state.mat.turnIn = v; state.materialTouched = true; rebuild(); } }
     else if (el.dataset.gsmCustom) { const v = num(el.value); if (v && v > 0) { state.mat[el.dataset.gsmCustom] = v; applyMatChange(); } }
     else if (el.dataset.paramGsmCustom) { const v = num(el.value); if (v && v > 0) { state.params[el.dataset.paramGsmCustom] = v; rebuild(); } }
+    else if (el.dataset.slot != null && el.dataset.key && geo.insertSpec) {
+      const i = +el.dataset.slot, k = el.dataset.key; const raw = rawSlots(); if (!raw[i]) return;
+      if (el.type === 'checkbox') raw[i][k] = el.checked;
+      else {
+        const v = el.value === '' ? null : num(el.value);
+        if (v === null && !(k === 'r' || k === 'depth')) return;
+        raw[i][k] = v;
+        if (v !== null && state.slotCoord === 'center' && (k === 'x' || k === 'y')) raw[i][k] = v + (k === 'x' ? geo.insertSpec.insL : geo.insertSpec.insW) / 2;
+      }
+      state.selectedSlot = i; commitSlots(raw);
+    }
+    else if (el.id === 'slotGap') { const v = num(el.value); if (v !== null && v >= 0) state.slotGap = v; }
     else if (el.dataset.param) { const k = el.dataset.param; if (el.type === 'checkbox') state.params[k] = el.checked; else state.params[k] = el.value === '' ? null : num(el.value); rebuild(); }
     else if (el.dataset.proc) { toggleProcess(el.dataset.proc, el.checked); }
   }, el.type === 'checkbox' ? 0 : 350);
@@ -400,10 +393,39 @@ $('#tabStruct').addEventListener('click', (e) => {
   if (blC) { state.params.blisterColor = blC.dataset.blisterColor; rebuild(); return; }
   const insP = e.target.closest('[data-ins-paper]');
   if (insP) { state.params.insPaperKind = insP.dataset.insPaper; rebuild(); return; }
-  const insSh = e.target.closest('[data-ins-shape]');
-  if (insSh) { state.params.insShape = insSh.dataset.insShape; rebuild(); return; }
-  const insAl = e.target.closest('[data-ins-align]');
-  if (insAl) { state.params.insAlign = insAl.dataset.insAlign; rebuild(); return; }
+  const setP = e.target.closest('[data-set-param]');
+  if (setP) { state.params[setP.dataset.setParam] = +setP.dataset.val; rebuild(); return; }
+  if (geo.insertSpec) {
+    const ins = insDims();
+    const dup = e.target.closest('[data-slot-dup]'), del = e.target.closest('[data-slot-del]');
+    if (dup) { e.preventDefault(); const i = +dup.dataset.slotDup; const next = duplicateSlot(rawSlots(), i, ins); state.selectedSlot = next.length - 1; commitSlots(next); return; }
+    if (del) { e.preventDefault(); const i = +del.dataset.slotDel; commitSlots(removeSlot(rawSlots(), i)); return; }
+    const sel = e.target.closest('[data-slot-select]');
+    if (sel) { e.preventDefault(); state.selectedSlot = +sel.dataset.slotSelect; renderStruct(); render2D(); return; }
+    const slotSet = e.target.closest('[data-slot-set]');
+    if (slotSet) {
+      const i = +slotSet.dataset.slot, k = slotSet.dataset.key; const raw = rawSlots();
+      const v = slotSet.dataset.val;
+      raw[i][k] = k === 'shape' || k === 'notchSide' ? v : (v === '' ? null : +v);
+      state.selectedSlot = i; commitSlots(raw); return;
+    }
+    const cen = e.target.closest('[data-slot-center]');
+    if (cen) { const i = +cen.dataset.slotCenter; state.selectedSlot = i; commitSlots(centerSlot(rawSlots(), i, cen.dataset.axis, ins)); return; }
+    if (e.target.closest('[data-slot-add]')) { const next = addSlot(rawSlots(), ins); state.selectedSlot = next.length - 1; commitSlots(next); return; }
+    const coord = e.target.closest('[data-slot-coord]');
+    if (coord) { state.slotCoord = coord.dataset.slotCoord; renderStruct(); return; }
+    const lay = e.target.closest('[data-slot-layout]');
+    if (lay) {
+      const raw = rawSlots(); const how = lay.dataset.slotLayout;
+      const gap = Math.max(0, num($('#slotGap')?.value) ?? state.slotGap); state.slotGap = gap;
+      const n = Math.max(1, Math.round(num($('#slotQuickN')?.value) ?? raw.length));
+      const next = how === 'centerAll' ? centerAll(raw, ins)
+        : how === 'distX' ? distribute(raw, ins, 'x') : how === 'distY' ? distribute(raw, ins, 'y')
+        : how === 'gapX' ? setSpacing(raw, ins, 'x', gap) : how === 'gapY' ? setSpacing(raw, ins, 'y', gap)
+        : how === 'quickAcross' ? quickArray(raw, n, ins, 'across') : quickArray(raw, n, ins, 'along');
+      commitSlots(next); return;
+    }
+  }
   const faceKind = e.target.closest('[data-face-kind]');
   if (faceKind) { state.mat.faceKind = faceKind.dataset.faceKind; if (state.mat.structure === 'carton') state.mat.faceGsm = state.mat.boardGsm; applyMatChange(); return; }
   const sp = e.target.closest('[data-special]');
