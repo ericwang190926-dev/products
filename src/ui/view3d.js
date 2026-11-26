@@ -5,13 +5,15 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { computeFold, foldedBBox } from '../core/fold.js';
 import { centroid, bbox, outsetPoly } from '../core/geom.js';
 import { renderFlat, renderFinishMaps } from '../render/raster.js';
+import { createContactShadows, createStudioFloor } from './contactShadows.js';
 
 export function createView3D(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.toneMapping = THREE.AgXToneMapping;
+  renderer.toneMappingExposure = 1.22;
   container.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(35, 1, 1, 10000);
@@ -20,13 +22,21 @@ export function createView3D(container) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new RoomEnvironment();
   scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-  scene.environmentIntensity = 1.05;
+  scene.environmentIntensity = 1.0;
   envScene.dispose();
   pmrem.dispose();
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa0aa, 1.15));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.15); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); scene.add(sun); scene.add(sun.target);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.4); scene.add(fill);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.16 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+  // Soft studio rig: high key (short ground shadow), cool fill, subtle rim. IBL stays for foil.
+  scene.add(new THREE.HemisphereLight(0xf7f8fb, 0xc4c8d0, 0.62));
+  const sun = new THREE.DirectionalLight(0xfff5ea, 0.95);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.bias = -0.0008;
+  sun.shadow.normalBias = 0.55;
+  scene.add(sun); scene.add(sun.target);
+  const fill = new THREE.DirectionalLight(0xe8eef8, 0.38); scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xfff8f2, 0.28); scene.add(rim);
+  const floor = createStudioFloor(scene);
+  const contact = createContactShadows(renderer, scene, { res: 512 });
   const root = new THREE.Group(); scene.add(root);
   let geo = null, meshes = [], tex = null, maskTex = null, fold = 1, open = 0, radius = 100, center0 = new THREE.Vector3(), viewM = new THREE.Matrix4();
   let showMagnets = false;
@@ -85,7 +95,7 @@ export function createView3D(container) {
       const fm = p.bulge ? bulgeFront : isGhost ? ghostFront : frontMat;
       const bm = p.bulge ? bulgeBack : isGhost ? ghostBack : backMat;
       for (const [mat, side] of [[fm, 'f'], [bm, 'b']]) {
-        const m = new THREE.Mesh(sg, mat); m.matrixAutoUpdate = false; m.castShadow = !isGhost; m.userData = { panel: p, side }; if (isGhost) m.renderOrder = 4; root.add(m); meshes.push(m);
+        const m = new THREE.Mesh(sg, mat); m.matrixAutoUpdate = false; m.castShadow = !isGhost; m.receiveShadow = !isGhost; m.userData = { panel: p, side }; if (isGhost) m.renderOrder = 4; root.add(m); meshes.push(m);
       }
     }
     const buildBlisterInsert = (e) => {
@@ -135,7 +145,7 @@ export function createView3D(container) {
           const holes = slotsE.filter((q) => q.depth >= zb - 1e-6).map((q) => q.poly);
           const g = new THREE.ExtrudeGeometry(shapeOf(outer, holes, true), { depth: zb - za, bevelEnabled: false });
           g.translate(0, 0, za);
-          const part = new THREE.Mesh(g, evaMat); part.castShadow = true; m.add(part);
+          const part = new THREE.Mesh(g, evaMat); part.castShadow = true; part.receiveShadow = true; m.add(part);
         }
         localM = new THREE.Matrix4().makeTranslation(e.cx, -e.cy, -(e.baseT / 2 + e.depth));
         if (e.rotated) localM.multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
@@ -145,7 +155,9 @@ export function createView3D(container) {
         localM = new THREE.Matrix4().makeTranslation(e.cx, -e.cy, -(e.baseT / 2 + e.depth));
         if (e.rotated) localM.multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
       }
-      if (!m) continue; m.matrixAutoUpdate = false; m.userData = { panel: p, extra: e, localM }; m.renderOrder = 2; root.add(m); meshes.push(m);
+      if (!m) continue; m.matrixAutoUpdate = false; m.userData = { panel: p, extra: e, localM }; m.renderOrder = 2;
+      if (e.type !== 'film') m.traverse((ch) => { if (ch.isMesh) { ch.castShadow = true; ch.receiveShadow = true; } });
+      root.add(m); meshes.push(m);
     }
     const magMat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, depthTest: false });
     const pointIn = (poly, x, y) => {
@@ -249,15 +261,30 @@ export function createView3D(container) {
       }
       m.matrix.copy(viewM).multiply(off).multiply(M).multiply(zOff); m.matrixWorldNeedsUpdate = true;
     }
-    // centre model at origin, ground below
+    // centre model at origin, studio floor just under the box
     root.position.set(0, 0, 0); root.updateMatrixWorld(true);
-    const box = new THREE.Box3(); for (const m of meshes) if (!m.userData.extra) box.expandByObject(m);
+    const box = new THREE.Box3(); for (const m of meshes) if (m.visible && !m.userData.extra) box.expandByObject(m);
+    if (box.isEmpty()) return;
     const c = box.getCenter(new THREE.Vector3());
     root.position.set(-c.x, -c.y, -c.z); root.updateMatrixWorld(true);
-    ground.position.set(0, box.min.y - c.y - 0.3, 0); ground.scale.set(radius * 8, radius * 8, 1);
-    sun.position.set(radius * 1.2, radius * 3, radius * 1.6); sun.target.position.set(0, 0, 0);
-    const sc = sun.shadow.camera; sc.left = sc.bottom = -radius * 2; sc.right = sc.top = radius * 2; sc.near = 1; sc.far = radius * 10; sc.updateProjectionMatrix();
-    fill.position.set(-radius * 2, radius, -radius);
+    const y0 = box.min.y - c.y - 0.25;
+    const span = box.getSize(new THREE.Vector3());
+    const foot = Math.max(span.x, span.z, 40);
+    floor.place(y0, Math.max(radius, foot));
+    const shadowSpan = Math.max(foot * 2.8, radius * 1.6);
+    contact.configure({ width: shadowSpan, depth: shadowSpan, y: y0, far: Math.max(span.y * 1.35, 50), cast: [0.014, -0.018] });
+    contact.render();
+    // High key: short ground shadow that stays close to the box. Tight frustum, cap 1024.
+    const keyDir = new THREE.Vector3(0.38, 0.9, 0.48).normalize();
+    sun.position.copy(keyDir).multiplyScalar(Math.max(radius * 4, span.length() * 2));
+    sun.target.position.set(0, 0, 0); sun.target.updateMatrixWorld();
+    const sc = sun.shadow.camera;
+    const half = Math.max(span.x, span.y, span.z) * 0.7 + 12;
+    sc.left = sc.bottom = -half; sc.right = sc.top = half;
+    sc.near = 1; sc.far = sun.position.length() + half; sc.updateProjectionMatrix();
+    renderer.shadowMap.needsUpdate = true;
+    fill.position.set(-radius * 2.2, radius * 0.85, -radius * 0.6);
+    rim.position.set(-radius * 0.6, radius * 1.4, radius * 2.2);
   }
 
   function resetView() {
