@@ -154,6 +154,64 @@ ok('书型盒 短边打开 moves flap to the short edge', await page.evaluate(()
 }));
 ok('覆膜 options include 触感膜', await page.evaluate(() => /触感膜/.test(document.body.innerText)));
 
+// 封套盒 inner box (rigid + folding) + 内衬 (EVA / 吸塑 / 纸盒 / 纸卡)
+await page.evaluate(() => { window.__app.state.materialTouched = false; window.__app.state.dimsTouched = false; window.__app.state.dimMode = 'outer'; window.__app.state.params = {}; });
+await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeout(200);
+await page.click('.card[data-id="sleeve"]'); await page.waitForTimeout(500);
+await page.click('#useDefaults'); await page.waitForTimeout(500);
+await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
+await setMode('3d'); await setFold(1, 0.42); await page.waitForTimeout(600);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/sleeve_rigid_3d.png` });
+ok('封套盒 defaults to 灰板裱纸内盒 and slides out in 3D', await page.evaluate(() => {
+  const g = window.__app.geo;
+  return g.sleeveInner?.innerBox === 'rigid' && !!g.byId.tbase && g.sheets.some((s) => s.id === 'wrapTray');
+}));
+
+await page.click('#propTabs button[data-tab="struct"]');
+await page.locator('label:has(input[name="innerBox"][value="folding"])').click();
+await page.waitForTimeout(600);
+await setMode('3d'); await setFold(1, 0.42);
+await page.click('#sleeveGhost'); await page.waitForTimeout(500);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/sleeve_folding_3d.png` });
+ok('封套半透明 toggle works', await page.evaluate(() => window.__app.state.sleeveGhost === true));
+await page.click('#sleeveGhost');
+ok('封套盒 switches to 铜版纸折叠内盒', await page.evaluate(() => {
+  const g = window.__app.geo;
+  return g.sleeveInner?.innerBox === 'folding' && !!g.byId.tbase && !g.sheets.some((s) => s.id === 'wrapTray');
+}));
+
+// EVA insert on 天地盒 3D
+await page.evaluate(() => { window.__app.state.materialTouched = false; window.__app.state.dimsTouched = false; window.__app.state.params = {}; });
+await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeout(200);
+await page.click('.card[data-id="lidbase"]'); await page.waitForTimeout(450);
+await page.click('#useDefaults'); await page.waitForTimeout(450);
+await page.click('[data-insert-type="eva"]'); await page.waitForTimeout(500);
+await page.fill('input[data-param="insCount"]', '2'); await page.waitForTimeout(600);
+await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
+await setMode('3d'); await setFold(1, 0.95); await page.waitForTimeout(600);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/eva_insert_3d.png` });
+ok('EVA insert renders on 天地盒 with 2 cavities', await page.evaluate(() => {
+  const g = window.__app.geo;
+  return g.insertSpec?.type === 'eva' && g.insertSpec.count === 2 && g.extras3d.some((e) => e.type === 'insert-eva' && e.holes.length === 2);
+}));
+
+// 纸盒 insert dieline + 纸卡 insert dieline
+await page.click('#propTabs button[data-tab="struct"]');
+await page.click('[data-insert-type="carton"]'); await page.waitForTimeout(500);
+await setMode('2d');
+await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+await page.waitForTimeout(300);
+await page.locator('#v2d').screenshot({ path: `${SHOTS}/carton_insert_dieline.png` });
+ok('纸盒 insert generates folding dieline', await page.evaluate(() => !!window.__app.geo.byId.insTop && window.__app.geo.byId.insTop.holes.length === 2));
+
+await page.click('[data-insert-type="card"]'); await page.waitForTimeout(500);
+await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+await page.waitForTimeout(300);
+await page.screenshot({ path: `${SHOTS}/card_insert_dieline.png`, clip: await page.locator('#v2d').boundingBox() });
+ok('纸卡 insert generates card dieline', await page.evaluate(() => !!window.__app.geo.byId.insCard && window.__app.geo.byId.insCard.holes.length === 2));
+await setMode('3d'); await page.waitForTimeout(300);
+
+
 await page.click('.card[data-id="hanger"]'); await page.waitForTimeout(400);
 await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(500);
 

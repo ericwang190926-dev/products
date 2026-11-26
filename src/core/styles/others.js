@@ -3,6 +3,7 @@ import { Builder } from '../builder.js';
 import { rect, flap, profile, roundRect, circlePoly, regularOnEdge, arcPoints, clamp, bbox, add, mul, outward, edgeLen } from '../geom.js';
 import { tube, tray, snapLock, dust, hangHole, glueTaper } from './common.js';
 import { addWrapSheet, trayWrapShape, coverWrapShape } from '../wrap.js';
+import { addInsertToBuilder, sleeveInnerSpec } from '../insert.js';
 
 const bboxOf = (b) => bbox(b.panels.flatMap((p) => p.poly));
 const to3 = (x, y, z = 0) => new Vector3(x, -y, z);
@@ -45,6 +46,9 @@ export function lidBase(c) {
     addWrapSheet(b, { id: 'wrapLid', x0: x, y0: baseSh.h + 12, shape: lidSh, label: '裱纸（盒盖）' });
     b.note(`硬盒裱纸已按板厚和 ${turn}mm 包边自动展开，与灰板刀版分开裁切。`);
   }
+  b.insertSpec = addInsertToBuilder(b, c, { L: c.inner.L, W: c.inner.W, H: c.inner.H }, {
+    panelId: 'base', cx: A / 2, cy: B / 2, baseT: t, assemble: null, openLift: 0, rotated: false,
+  });
   return b;
 }
 export const lidBaseExpect = (c) => {
@@ -110,6 +114,10 @@ export function bookBox(c) {
     addWrapSheet(b, { id: 'wrapTray', x0: x, y0: cov.h + 12, shape: traySh, label: '裱纸（内盒）' });
     b.note(`硬盒裱纸已按板厚和 ${turn}mm 包边自动展开，与灰板刀版分开裁切。`);
   }
+  b.insertSpec = addInsertToBuilder(b, c, { L: c.inner.L, W: c.inner.W, H: c.inner.H }, {
+    panelId: 'tbase', cx: tx + trayA / 2, cy: ty + trayB / 2, baseT: t,
+    assemble: b.roots[1].assemble, openLift: 0, rotated: !shortOpen,
+  });
   return b;
 }
 export const bookExpect = (c) => { const L = c.A + c.t + 2 * c.p.overhang; return { size: [L, c.B + c.t + 2 * c.p.overhang, c.D + 1.5 * c.t] }; };
@@ -136,12 +144,79 @@ export function drawer(c) {
     addWrapSheet(b, { id: 'wrapTray', x0: bbw.x1 + 18, y0: 0, shape: trayWrapShape({ Lo: A + t, Wo: B + t, wall: D, turn }), label: '裱纸（内托）' });
     b.note(`内托裱纸已按板厚和 ${turn}mm 包边自动展开，与灰板刀版分开裁切。`);
   }
+  b.insertSpec = addInsertToBuilder(b, c, { L: c.inner.L, W: c.inner.W, H: c.inner.H }, {
+    panelId: 'tbase', cx: tx + A / 2, cy: ty + B / 2, baseT: t,
+    assemble: b.roots[1].assemble, openLift: b.roots[1].openLift, rotated: false,
+  });
   return b;
 }
 export const drawerExpect = (c) => ({ size: [c.B + 2 * c.t + 2 * c.p.clear, c.A + c.t, c.D + 2 * c.t + c.p.clear] });
 
-// ---------------- 封套 / 腰封 sleeve ----------------
+// ---------------- 封套盒 sleeve ----------------
 export function sleeve(c) {
+  const { A, B, H, t, p } = c; const b = new Builder();
+  const g = Math.min(p.glue, B - 2);
+  const T = tube(b, { A, B, D: H, g });
+  b.chains([...T.X, T.X[4] + B], H, [0, H], T.X[1]);
+  const si = sleeveInnerSpec(c);
+  b.sleeveInner = si;
+  if (si.innerBox !== 'none') {
+    const bb = bboxOf(b);
+    const tx = bb.x1 + 20 + 2 * si.D;
+    const ty = H / 2 - si.B / 2;
+    tray(b, {
+      pre: 't', x0: tx, y0: ty, A: si.A, B: si.B, D: si.D, t: si.tIn, thick: si.tIn,
+      double: si.D > si.tIn + 1.5, faces: {}, root: { part: 'tray' },
+    });
+    const R = new Matrix4().makeRotationX(Math.PI);
+    const zBase = -(B - t / 2 - si.tIn / 2);
+    b.roots[1].assemble = place(to3(tx + si.A / 2, ty + si.B / 2), to3(T.front.cx, T.front.cy, zBase), R);
+    b.roots[1].openLift = [0, -H * 0.55, 0];
+    b.view3d = { rx: -90, ry: 0 };
+    b.mark({ type: 'label', x: T.front.cx, y: -7, text: '封套刀版' });
+    const trayTopY = Math.min(ty - si.D, 0);
+    const innerTitle = si.innerBox === 'rigid'
+      ? `内盒刀版（${si.greyGsm}g灰板）`
+      : `内盒刀版（${si.paperGsm}g铜版纸折叠）`;
+    b.mark({ type: 'label', x: tx + si.A / 2, y: trayTopY - 7, text: innerTitle });
+    b.note(si.innerBox === 'rigid'
+      ? `封套盒：配灰板裱纸内盒（${si.greyGsm}g灰板 + ${si.wrapGsm}g铜版纸裱面），内盒按封套外尺寸减去板厚与 ${si.cl}mm 缝隙自动计算，并单独展开内盒裱纸。`
+      : `封套盒：配 ${si.paperGsm}g 铜版纸折叠内盒，内盒按封套外尺寸减去板厚与 ${si.cl}mm 缝隙自动计算。`);
+    const bbw = bboxOf(b);
+    const wrapX = bbw.x1 + 20;
+    let nextY = 0;
+    if (si.innerBox === 'rigid') {
+      const turn = c.turnIn ?? 15;
+      const traySh = trayWrapShape({ Lo: si.A + si.tIn, Wo: si.B + si.tIn, wall: si.D, turn });
+      addWrapSheet(b, { id: 'wrapTray', x0: wrapX, y0: nextY, shape: traySh, label: '裱纸（内盒）' });
+      b.mark({ type: 'label', x: wrapX + traySh.w / 2, y: nextY - 7, text: `内盒裱纸（${si.wrapGsm}g铜版纸 · 包边${turn}mm）` });
+      nextY += traySh.h + 18;
+    }
+    if (c.wrap) {
+      const turn = c.turnIn ?? 15;
+      const covSh = coverWrapShape({ w: g + 2 * A + 2 * B, h: H, turn, bands: [] });
+      addWrapSheet(b, { id: 'wrapSleeve', x0: wrapX, y0: nextY, shape: covSh, label: '裱纸（封套）' });
+    }
+    b.insertSpec = addInsertToBuilder(b, c, si.interior, {
+      panelId: 'tbase', cx: tx + si.A / 2, cy: ty + si.B / 2, baseT: si.tIn,
+      assemble: b.roots[1].assemble, openLift: b.roots[1].openLift, rotated: false,
+    });
+  } else {
+    b.note('封套盒：仅生成外封套刀版（无内盒）。');
+    b.insertSpec = addInsertToBuilder(b, c, {
+      L: Math.max(10, c.inner.L),
+      W: Math.max(10, c.inner.H),
+      H: Math.max(6, c.inner.W),
+    }, {
+      panelId: 'back', cx: T.back.cx, cy: T.back.cy, baseT: t,
+      assemble: null, openLift: 0, rotated: false,
+    });
+  }
+  return b;
+}
+
+// ---------------- 腰封 band ----------------
+export function band(c) {
   const { A, B, H, p } = c; const b = new Builder();
   const T = tube(b, { A, B, D: H, g: Math.min(p.glue, B - 2) });
   b.chains([...T.X, T.X[4] + B], H, [0, H], T.X[1]);

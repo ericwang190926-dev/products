@@ -7,8 +7,8 @@ const fromC = (path) => path.map((p) => [p.X / SCALE, p.Y / SCALE]);
 
 export const FACE_NAMES = { front: '正面', back: '背面', left: '左侧面', right: '右侧面', top: '顶面', bottom: '底面', header: '挂头/展示面', inside: '内面' };
 export const FACE_EN = { front: 'FRONT', back: 'BACK', left: 'LEFT', right: 'RIGHT', top: 'TOP', bottom: 'BOTTOM', header: 'HEADER', inside: 'INSIDE' };
-export const KIND_NAMES = { panel: '', glue: '粘口', tuck: '插舌', dust: '防尘翼', lid: '盖', flap: '折翼', hem: '包边', lock: '锁扣', wall: '墙板', inner: '内折', corner: '粘角', header: '挂头', handle: '提手', ear: '耳翼', wrap: '裱纸' };
-export const KIND_EN = { glue: 'GLUE', tuck: 'TUCK', dust: 'DUST FLAP', lid: 'LID', flap: 'FLAP', hem: 'HEM / FLAP', lock: 'LOCK', wall: 'WALL', inner: 'INNER', corner: 'CORNER', header: 'HEADER', handle: 'HANDLE', ear: 'EAR', wrap: 'WRAP PAPER' };
+export const KIND_NAMES = { panel: '', glue: '粘口', tuck: '插舌', dust: '防尘翼', lid: '盖', flap: '折翼', hem: '包边', lock: '锁扣', wall: '墙板', inner: '内折', corner: '粘角', header: '挂头', handle: '提手', ear: '耳翼', wrap: '裱纸', insert: '内衬' };
+export const KIND_EN = { glue: 'GLUE', tuck: 'TUCK', dust: 'DUST FLAP', lid: 'LID', flap: 'FLAP', hem: 'HEM / FLAP', lock: 'LOCK', wall: 'WALL', inner: 'INNER', corner: 'CORNER', header: 'HEADER', handle: 'HANDLE', ear: 'EAR', wrap: 'WRAP PAPER', insert: 'INSERT' };
 
 /**
  * Collects panels (a hinge tree for 3D folding) plus extra lines; then derives cut/crease lines.
@@ -18,7 +18,7 @@ export class Builder {
   constructor() { this.panels = []; this.byId = {}; this.creases = []; this.perfs = []; this.glue = []; this.dims = []; this.marks = []; this.notes = []; this.roots = []; this.extras3d = []; this.sheets = []; }
   add(id, poly, o = {}) {
     if (this.byId[id]) throw new Error('duplicate panel ' + id);
-    const p = { join: !!o.join, id, poly, holes: o.holes || [], parent: o.parent || null, hinge: o.hinge || null, angle: o.angle ?? 90, face: o.face || null, faceRot: o.faceRot || 0, kind: o.kind || 'panel', label: o.label, layer: o.layer || 0, openable: !!o.openable, solve: o.solve || null, bulge: o.bulge || 0, part: o.part };
+    const p = { join: !!o.join, id, poly, holes: o.holes || [], parent: o.parent || null, hinge: o.hinge || null, angle: o.angle ?? 90, face: o.face || null, faceRot: o.faceRot || 0, kind: o.kind || 'panel', label: o.label, layer: o.layer || 0, openable: !!o.openable, solve: o.solve || null, bulge: o.bulge || 0, part: o.part, thick: o.thick ?? null };
     if (!p.parent) { this.roots.push({ id, assemble: o.assemble || null, openLift: o.openLift || 0 }); }
     this.panels.push(p); this.byId[id] = p; return p;
   }
@@ -63,7 +63,9 @@ export function finalize(b, { bleed = 3 } = {}) {
     for (const ring of [p.poly, ...p.holes]) for (let i = 0; i < ring.length; i++) edges.push([ring[i], ring[(i + 1) % ring.length]]);
   }
   for (const s of b.sheets || []) {
-    for (let i = 0; i < s.poly.length; i++) edges.push([s.poly[i], s.poly[(i + 1) % s.poly.length]]);
+    for (const ring of [s.poly, ...(s.holes || [])]) {
+      for (let i = 0; i < ring.length; i++) edges.push([ring[i], ring[(i + 1) % ring.length]]);
+    }
   }
   const creaseSegs = [...b.panels.filter((p) => p.hinge && !p.join).map((p) => p.hinge), ...b.creases, ...(b.sheets || []).flatMap((s) => s.creases || [])];
   const joinG = intervals(b.panels.filter((p) => p.join).map((p) => p.hinge));
@@ -82,7 +84,7 @@ export function finalize(b, { bleed = 3 } = {}) {
   // union outline & bleed via Clipper
   const c = new ClipperLib.Clipper();
   for (const p of b.panels) { c.AddPath(toC(p.poly), ClipperLib.PolyType.ptSubject, true); }
-  for (const s of b.sheets || []) { c.AddPath(toC(s.poly), ClipperLib.PolyType.ptSubject, true); }
+  for (const s of b.sheets || []) { if (!s.noBleed) c.AddPath(toC(s.poly), ClipperLib.PolyType.ptSubject, true); }
   const uni = new ClipperLib.Paths(); c.Execute(ClipperLib.ClipType.ctUnion, uni, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
   const holesC = b.panels.flatMap((p) => p.holes.map(toC));
   const outline = fromPaths(uni);
@@ -102,7 +104,9 @@ export function finalize(b, { bleed = 3 } = {}) {
     faceRegions[p.id] = fromPaths(res);
   }
   const all = b.panels.flatMap((p) => p.poly).concat((b.sheets || []).flatMap((s) => s.poly));
-  const bb = bbox(all); const bbBleed = bbox(bleedRegion.flat());
+  const bb = bbox(all);
+  const noBleedPts = (b.sheets || []).filter((s) => s.noBleed).flatMap((s) => s.poly);
+  const bbBleed = bbox(bleedRegion.flat().concat(noBleedPts));
   const dims = [...b.dims];
   const uniq = (a) => [...new Set(a.map((v) => Math.round(v * 100) / 100))].sort((p, q) => p - q);
   if (b.chainX) { const xs = uniq(b.chainX.xs); for (let i = 0; i < xs.length - 1; i++) dims.push({ dir: 'h', x1: xs[i], x2: xs[i + 1], ref: bb.y1 + 2, at: bb.y1 + 10 }); }

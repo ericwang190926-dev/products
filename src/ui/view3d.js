@@ -29,7 +29,7 @@ export function createView3D(container) {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.16 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
   const root = new THREE.Group(); scene.add(root);
   let geo = null, meshes = [], tex = null, maskTex = null, fold = 1, open = 0, radius = 100, center0 = new THREE.Vector3(), viewM = new THREE.Matrix4();
-  let frontMat = null, backMat = null, bulgeFront = null, bulgeBack = null;
+  let frontMat = null, backMat = null, bulgeFront = null, bulgeBack = null, ghostFront = null, ghostBack = null;
 
   let userMoved = false;
   function resize() { const w = container.clientWidth || 1, h = container.clientHeight || 1; renderer.setSize(w, h, false); renderer.domElement.style.width = '100%'; renderer.domElement.style.height = '100%'; camera.aspect = w / h; camera.updateProjectionMatrix(); if (geo && !userMoved) resetView(); }
@@ -40,7 +40,17 @@ export function createView3D(container) {
     for (let i = 0; i < pos.count; i++) { uv[2 * i] = (pos.getX(i) - bb.x) / bb.w; uv[2 * i + 1] = 1 - (-pos.getY(i) - bb.y) / bb.h; }
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   }
-  const shapeOf = (poly, holes = []) => { const s = new THREE.Shape(poly.map((p) => new THREE.Vector2(p[0], -p[1]))); for (const h of holes) s.holes.push(new THREE.Path(h.map((p) => new THREE.Vector2(p[0], -p[1])))); return s; };
+  const shapeOf = (poly, holes = [], orient = false) => {
+    let pts = poly.map((p) => new THREE.Vector2(p[0], -p[1]));
+    if (orient && THREE.ShapeUtils.isClockWise(pts)) pts = pts.slice().reverse();
+    const s = new THREE.Shape(pts);
+    for (const h of holes) {
+      let hp = h.map((p) => new THREE.Vector2(p[0], -p[1]));
+      if (orient && !THREE.ShapeUtils.isClockWise(hp)) hp = hp.slice().reverse();
+      s.holes.push(new THREE.Path(hp));
+    }
+    return s;
+  };
 
   function bulgeGeometry(p, bb) {
     const pb = bbox(p.poly); const g = new THREE.PlaneGeometry(pb.w, pb.h, 48, 64); g.translate(pb.x + pb.w / 2, -(pb.y + pb.h / 2), 0);
@@ -55,26 +65,74 @@ export function createView3D(container) {
 
   function setGeometry(g, state, { refit = true } = {}) {
     geo = g;
-    for (const m of meshes) { m.geometry.dispose(); root.remove(m); }
+    for (const m of meshes) { m.traverse?.((ch) => { if (ch.geometry) ch.geometry.dispose(); }); root.remove(m); }
     meshes = [];
     const bb = geo.bboxBleed;
-    frontMat?.dispose(); backMat?.dispose(); bulgeFront?.dispose(); bulgeBack?.dispose();
+    frontMat?.dispose(); backMat?.dispose(); bulgeFront?.dispose(); bulgeBack?.dispose(); ghostFront?.dispose(); ghostBack?.dispose();
     frontMat = new THREE.MeshPhysicalMaterial({ roughness: 0.55, metalness: 0, side: THREE.FrontSide, clearcoat: 0 });
     backMat = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.BackSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
     bulgeFront = new THREE.MeshPhysicalMaterial({ roughness: 0.5, side: THREE.FrontSide, alphaTest: 0.5 });
     bulgeBack = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.BackSide, alphaTest: 0.5 });
+    ghostFront = new THREE.MeshPhysicalMaterial({ roughness: 0.55, metalness: 0, side: THREE.FrontSide, transparent: true, opacity: 0.28, depthWrite: false });
+    ghostBack = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.BackSide, transparent: true, opacity: 0.22, depthWrite: false });
+    const useSleeveGhost = geo.style?.id === 'sleeve' && !!state.sleeveGhost;
     for (const p of geo.panels) {
       let sg;
       if (p.bulge) sg = bulgeGeometry(p, bb); else { sg = new THREE.ShapeGeometry(shapeOf(p.poly, p.holes)); uvFor(sg, bb); }
-      for (const [mat, side] of [[p.bulge ? bulgeFront : frontMat, 'f'], [p.bulge ? bulgeBack : backMat, 'b']]) {
-        const m = new THREE.Mesh(sg, mat); m.matrixAutoUpdate = false; m.castShadow = true; m.userData = { panel: p, side }; root.add(m); meshes.push(m);
+      const isGhost = useSleeveGhost && p.part !== 'tray' && p.part !== 'insert';
+      const fm = p.bulge ? bulgeFront : isGhost ? ghostFront : frontMat;
+      const bm = p.bulge ? bulgeBack : isGhost ? ghostBack : backMat;
+      for (const [mat, side] of [[fm, 'f'], [bm, 'b']]) {
+        const m = new THREE.Mesh(sg, mat); m.matrixAutoUpdate = false; m.castShadow = !isGhost; m.userData = { panel: p, side }; if (isGhost) m.renderOrder = 4; root.add(m); meshes.push(m);
       }
     }
+    const buildBlisterInsert = (e) => {
+      const grp = new THREE.Group();
+      const mat = new THREE.MeshPhysicalMaterial({
+        color: e.color, transparent: e.opacity < 1, opacity: e.opacity,
+        roughness: e.rough, metalness: 0.04, clearcoat: e.opacity < 1 ? 0.8 : 0.1,
+        side: THREE.DoubleSide, depthWrite: e.opacity >= 1,
+      });
+      const outer = [[-e.L / 2, -e.W / 2], [e.L / 2, -e.W / 2], [e.L / 2, e.W / 2], [-e.L / 2, e.W / 2]];
+      const flangeG = new THREE.ExtrudeGeometry(shapeOf(outer, e.slots.map((s) => s.poly), true), { depth: 0.6, bevelEnabled: false });
+      const flangeM = new THREE.Mesh(flangeG, mat);
+      grp.add(flangeM);
+      const wallD = Math.max(1, e.depth - 0.3);
+      for (const s of e.slots) {
+        const botG = new THREE.ShapeGeometry(shapeOf(s.poly));
+        botG.translate(0, 0, wallD);
+        grp.add(new THREE.Mesh(botG, mat));
+        const pts = s.poly;
+        const pos = [];
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i], b = pts[(i + 1) % pts.length];
+          const x0 = a[0], y0 = -a[1], x1 = b[0], y1 = -b[1];
+          pos.push(x0, y0, 0, x1, y1, 0, x1, y1, wallD, x0, y0, 0, x1, y1, wallD, x0, y0, wallD);
+        }
+        const wg = new THREE.BufferGeometry();
+        wg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        wg.computeVertexNormals();
+        grp.add(new THREE.Mesh(wg, mat));
+      }
+      return grp;
+    };
     for (const e of geo.extras3d) {
-      const p = geo.byId[e.panel]; if (!p) continue; let m;
+      const p = geo.byId[e.panel]; if (!p) continue; let m; let localM = null;
       if (e.type === 'film') m = new THREE.Mesh(new THREE.ShapeGeometry(shapeOf(e.poly)), new THREE.MeshStandardMaterial({ color: 0xdfefff, transparent: true, opacity: 0.22, roughness: 0.05, side: THREE.DoubleSide, depthWrite: false }));
       if (e.type === 'blister') { const eg = new THREE.ExtrudeGeometry(shapeOf(e.poly), { depth: e.depth, bevelEnabled: true, bevelThickness: Math.min(4, e.depth * 0.3), bevelSize: 2, bevelSegments: 4 }); m = new THREE.Mesh(eg, new THREE.MeshPhysicalMaterial({ color: 0xf2f8ff, transparent: true, opacity: 0.28, roughness: 0.08, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false })); }
-      if (!m) continue; m.matrixAutoUpdate = false; m.userData = { panel: p, extra: e }; m.renderOrder = 2; root.add(m); meshes.push(m);
+      if (e.type === 'insert-eva') {
+        const outer = [[-e.L / 2, -e.W / 2], [e.L / 2, -e.W / 2], [e.L / 2, e.W / 2], [-e.L / 2, e.W / 2]];
+        const eg = new THREE.ExtrudeGeometry(shapeOf(outer, e.holes || [], true), { depth: e.depth, bevelEnabled: false });
+        m = new THREE.Mesh(eg, new THREE.MeshStandardMaterial({ color: e.color, roughness: 0.92, metalness: 0.02 }));
+        localM = new THREE.Matrix4().makeTranslation(e.cx, -e.cy, -(e.baseT / 2 + e.depth));
+        if (e.rotated) localM.multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
+      }
+      if (e.type === 'insert-blister') {
+        m = buildBlisterInsert(e);
+        localM = new THREE.Matrix4().makeTranslation(e.cx, -e.cy, -(e.baseT / 2 + e.depth));
+        if (e.rotated) localM.multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
+      }
+      if (!m) continue; m.matrixAutoUpdate = false; m.userData = { panel: p, extra: e, localM }; m.renderOrder = 2; root.add(m); meshes.push(m);
     }
     const magMat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
     const pointIn = (poly, x, y) => {
@@ -113,12 +171,12 @@ export function createView3D(container) {
     mx.fillStyle = '#000'; mx.fillRect(0, 0, mc.width, mc.height); mx.setTransform(mc.width / bb.w, 0, 0, mc.height / bb.h, (-bb.x * mc.width) / bb.w, (-bb.y * mc.height) / bb.h);
     mx.fillStyle = '#fff'; mx.beginPath(); for (const p of geo.panels) { p.poly.forEach((q, i) => (i ? mx.lineTo(q[0], q[1]) : mx.moveTo(q[0], q[1]))); mx.closePath(); } mx.fill();
     maskTex?.dispose(); maskTex = new THREE.CanvasTexture(mc);
-    frontMat.map = tex; bulgeFront.map = tex;
-    backMat.color.set(state.boardColor); bulgeBack.color.set(state.boardColor); bulgeBack.alphaMap = maskTex; bulgeBack.needsUpdate = true; bulgeFront.alphaMap = maskTex;
+    frontMat.map = tex; bulgeFront.map = tex; ghostFront.map = tex;
+    backMat.color.set(state.boardColor); ghostBack.color.set(state.boardColor); bulgeBack.color.set(state.boardColor); bulgeBack.alphaMap = maskTex; bulgeBack.needsUpdate = true; bulgeFront.alphaMap = maskTex;
     const maps = renderFinishMaps(geo, state, { ppm, maxPx: 2048 });
     const asTex = (cv) => { const t2 = new THREE.CanvasTexture(cv); t2.colorSpace = THREE.NoColorSpace; t2.anisotropy = tex.anisotropy; return t2; };
     const lam = state.lamination || 'none';
-    for (const mat of [frontMat, bulgeFront]) {
+    for (const mat of [frontMat, bulgeFront, ghostFront]) {
       mat.roughnessMap?.dispose(); mat.metalnessMap?.dispose(); mat.bumpMap?.dispose(); mat.clearcoatMap?.dispose();
       if (maps.hasFinish) {
         mat.roughnessMap = asTex(maps.roughness); mat.roughness = 1;
@@ -148,10 +206,17 @@ export function createView3D(container) {
     if (!geo) return;
     const mats = computeFold(geo, { progress: fold, open });
     const env = foldedBBox(geo, mats); const C = env.min.clone().add(env.max).multiplyScalar(0.5);
-    const delta = Math.max(0.25, geo.ctx.t * 0.9);
     for (const m of meshes) {
       const p = m.userData.panel; const M = mats[p.id]; if (!M) continue;
+      if (m.userData.localM) {
+        m.visible = fold >= 0.85;
+        m.matrix.copy(viewM).multiply(M).multiply(m.userData.localM);
+        m.matrixWorldNeedsUpdate = true;
+        continue;
+      }
       let off = new THREE.Matrix4();
+      const pt = p.thick ?? geo.ctx.t ?? 0;
+      const delta = Math.max(0.25, pt * 0.9);
       const layer = m.userData.extra ? (m.userData.extra.type === 'film' ? 0.5 : 0) : p.layer;
       if (layer) {
         const n = new THREE.Vector3(0, 0, 1).transformDirection(M); const c = centroid(p.poly); const P = new THREE.Vector3(c[0], -c[1], 0).applyMatrix4(M);
@@ -159,7 +224,7 @@ export function createView3D(container) {
         const sgn = p.angle >= 179 ? 1 : Math.sign(n.dot(C.clone().sub(P))) || -1; const d = n.multiplyScalar(sgn * layer * delta);
         off.makeTranslation(d.x, d.y, d.z);
       }
-      const half = (geo.ctx.t || 0) / 2;
+      const half = pt / 2;
       const zOff = new THREE.Matrix4();
       if (m.userData.extra?.type === 'magnet') {
         zOff.makeTranslation(m.userData.extra.x, -m.userData.extra.y, half + 0.15);

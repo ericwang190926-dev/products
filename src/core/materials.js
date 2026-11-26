@@ -1,3 +1,4 @@
+import { insertSummaryLine, sleeveInnerSummaryLine } from './insert.js';
 /**
  * Material model aimed at sales / merchandisers, not converters.
  *
@@ -232,7 +233,7 @@ function fmtQuoteDims(style, obj) {
 }
 
 /** Quote-sheet lines in plain Chinese (also used on the PDF title block). */
-export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBleed, lamination, finishRegions, outer, inner, lidType, openDir }) {
+export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBleed, lamination, finishRegions, outer, inner, lidType, openDir, sleeveInner, insertSpec }) {
   const outerObj = outer && !Array.isArray(outer) ? outer : (Array.isArray(outer) ? { L: outer[0], W: outer[1], H: outer[2] } : null);
   const innerObj = inner || dims;
   const lines = [
@@ -244,12 +245,17 @@ export function quoteInfoLines({ style, dims, mat, t, faceT, bleed, bbox, bboxBl
   if (style.id === 'book') {
     lines.push(`开盒方向：${openDir === 'short' ? '短边打开' : '长边打开'}`);
   }
+  if (style.id === 'sleeve' && sleeveInner) {
+    lines.push(sleeveInnerSummaryLine(sleeveInner));
+  }
   if (outerObj) lines.push(`外尺寸（外面量到的尺寸）：${fmtQuoteDims(style, outerObj)}`);
   if (innerObj) lines.push(`内尺寸（里面能放的产品）：${fmtQuoteDims(style, innerObj)}`);
   lines.push(materialSummary(mat, t));
   if (mat.structure === 'rigid') {
     lines.push(`裱纸包边 ${mat.turnIn ?? 15} mm，面纸厚约${(faceT ?? faceThickness(mat)).toFixed(2)}mm`);
   }
+  const insLine = insertSummaryLine(insertSpec);
+  if (insLine) lines.push(insLine);
   lines.push(finishSummary(lamination, finishRegions));
   if (bbox) lines.push(`展开尺寸 ${bbox.w.toFixed(1)} × ${bbox.h.toFixed(1)} mm` + (bboxBleed ? `（含多印边 ${bboxBleed.w.toFixed(1)} × ${bboxBleed.h.toFixed(1)}）` : ''));
   if (bleed != null) lines.push(`多印边（出血） ${bleed} mm；刀线专色 CutContour，压痕专色 Crease` + processSpotNote(finishRegions));

@@ -362,3 +362,103 @@ test('书型盒 PDF has a 磁铁位置 layer', async () => {
   const svg = buildSVG(geo);
   assert.match(svg, /磁铁位置/);
 });
+
+import { buildSVG, buildDXF } from '../src/export/vector.js';
+import { buildPDF } from '../src/export/pdf.js';
+
+test('封套盒 defaults to 灰板裱纸内盒 with wrap sheet and clearance', () => {
+  const g = buildGeometry('sleeve', { L: 200, W: 80, H: 120, t: 0.5, dimMode: 'outer', params: { clear: 1 } });
+  assert.equal(g.sleeveInner.innerBox, 'rigid');
+  assert.ok(g.byId.tbase && g.byId.front, 'has both outer sleeve and inner tray');
+  const wrap = g.sheets.find((s) => s.id === 'wrapTray');
+  assert.ok(wrap && wrap.label === '裱纸（内盒）', 'rigid inner box emits wrap sheet');
+  near(g.sleeveInner.outer.L, 200 - 2 * 0.5 - 2 * 1, 1e-6, 'inner L = outer L - 2t - 2*clear');
+  near(g.sleeveInner.outer.H, 80 - 2 * 0.5 - 1, 1e-6, 'inner H = outer W - 2t - clear');
+  near(g.sleeveInner.outer.W, 120, 1e-6, 'inner W = outer H');
+  const gTight = buildGeometry('sleeve', { L: 200, W: 80, H: 120, t: 0.5, dimMode: 'outer', params: { clear: 2 } });
+  near(g.sleeveInner.outer.L - gTight.sleeveInner.outer.L, 2, 1e-6, 'larger clear shrinks inner box by 2*delta');
+});
+
+test('封套盒 supports 铜版纸折叠内盒 and 无内盒, and 腰封 stays plain band', () => {
+  const gf = buildGeometry('sleeve', { L: 200, W: 80, H: 120, t: 0.5, dimMode: 'outer', params: { innerBox: 'folding', innerPaperGsm: 350 } });
+  assert.equal(gf.sleeveInner.innerBox, 'folding');
+  assert.ok(gf.byId.tbase, 'folding inner tray built');
+  assert.ok(!gf.sheets.some((s) => s.id === 'wrapTray'), 'folding inner box does not emit wrapTray');
+  near(gf.sleeveInner.tIn, thicknessFromGsm('coated', 350), 1e-6, '350g coated paper thickness');
+
+  const gn = buildGeometry('sleeve', { L: 200, W: 80, H: 120, t: 0.5, dimMode: 'outer', params: { innerBox: 'none' } });
+  assert.equal(gn.sleeveInner.innerBox, 'none');
+  assert.ok(!gn.byId.tbase, 'no inner tray when innerBox=none');
+
+  const gb = buildGeometry('band', { L: 200, W: 80, H: 50, t: 0.5, dimMode: 'outer' });
+  assert.ok(!gb.byId.tbase && !gb.sleeveInner, '腰封 stays a plain band');
+});
+
+test('内衬 EVA / 吸塑 / 纸盒 / 纸卡 auto-fit 天地盒, 抽屉盒, 书型盒, 封套盒', () => {
+  // 1. EVA on 天地盒
+  const gEva = buildGeometry('lidbase', {
+    L: 220, W: 120, H: 60, t: 1.9, dimMode: 'outer',
+    params: { insertType: 'eva', evaThick: 20, evaColor: 'black', insShape: 'roundRect', insCount: 2, insCavL: 170, insCavW: 28 },
+  });
+  assert.equal(gEva.insertSpec.type, 'eva');
+  near(gEva.insertSpec.insL, gEva.ctx.inner.L, 1e-6, 'EVA fits inner L');
+  near(gEva.insertSpec.insW, gEva.ctx.inner.W, 1e-6, 'EVA fits inner W');
+  const evaSh = gEva.sheets.find((s) => s.id === 'insertEva');
+  assert.ok(evaSh && evaSh.noBleed && evaSh.holes.length === 2, 'EVA sheet has 2 cavity holes and noBleed');
+  assert.ok(gEva.extras3d.some((e) => e.type === 'insert-eva' && e.holes.length === 2), '3D EVA extra');
+
+  // 2. Blister on 抽屉盒
+  const gBl = buildGeometry('drawer', {
+    L: 200, W: 80, H: 40, t: 1.9, dimMode: 'outer',
+    params: { insertType: 'blister', blisterColor: 'flock', blisterDepth: 18, insCount: 1 },
+  });
+  assert.equal(gBl.insertSpec.type, 'blister');
+  assert.ok(gBl.sheets.some((s) => s.id === 'insertBlister' && s.creases.length > 4), 'blister reference plan');
+  assert.ok(gBl.notes.some((n) => n.includes('模具') && n.includes('参考')), 'plain-Chinese mold-tooling note');
+  assert.ok(gBl.extras3d.some((e) => e.type === 'insert-blister' && e.color === '#2c2938'), '3D blister flock extra');
+
+  // 3. Carton folding insert on 书型盒 (long open rotates 90 deg)
+  const gCar = buildGeometry('book', {
+    L: 220, W: 120, H: 60, t: 1.9, dimMode: 'outer',
+    params: { insertType: 'carton', insPaperKind: 'board', insPaperGsm: 350, insPlatH: 24, insShape: 'circle', insCount: 3, insCavL: 22 },
+  });
+  assert.ok(gCar.byId.insTop && gCar.byId.insF && gCar.byId.insL && gCar.byId.insFFoot, 'carton insert has real folding panels');
+  assert.equal(gCar.byId.insTop.holes.length, 3, '3 circular holes');
+  assert.ok(gCar.cut.length > 0 && gCar.crease.length > 0);
+  const mats = computeFold(gCar, { progress: 1 });
+  const topPts = gCar.byId.insTop.poly.map((q) => {
+    const v = new (mats.insTop.constructor)().copy(mats.insTop);
+    return [q[0], q[1], v.elements[12]];
+  });
+  assert.ok(Number.isFinite(topPts[0][2]), 'carton insert folds cleanly');
+
+  // 4. Card insert on 封套盒 with inner box
+  const gCard = buildGeometry('sleeve', {
+    L: 200, W: 80, H: 120, t: 0.5, dimMode: 'outer',
+    params: { innerBox: 'rigid', insertType: 'card', insPaperKind: 'coated', insPaperGsm: 350, insCount: 2 },
+  });
+  assert.ok(gCard.byId.insCard && gCard.byId.insCard.holes.length === 2, 'card insert dieline has 2 holes');
+  near(gCard.insertSpec.insL, gCard.sleeveInner.interior.L, 1e-6, 'card fits sleeve inner box L');
+
+  // 5. Quote lines + PDF / SVG / DXF include sleeve inner & insert details
+  const style = STYLE_MAP.sleeve;
+  const mat = defaultMaterialFor('sleeve');
+  const lines = quoteInfoLines({
+    style, dims: style.defaults, mat, t: 0.5, faceT: 0, bleed: 3,
+    bbox: gCard.bbox, bboxBleed: gCard.bboxBleed,
+    lamination: 'none', finishRegions: [],
+    outer: gCard.ctx.outer, inner: gCard.ctx.inner,
+    sleeveInner: gCard.sleeveInner, insertSpec: gCard.insertSpec,
+  });
+  const txt = lines.join('\n');
+  assert.match(txt, /灰板裱纸内盒/);
+  assert.match(txt, /内衬：纸卡/);
+  const pdf = buildPDF(gCard, { info: lines });
+  assert.equal(Buffer.from(pdf.slice(0, 5)).toString(), '%PDF-');
+  const svg = buildSVG(gCard);
+  assert.match(svg, /封套刀版/);
+  assert.match(svg, /内盒刀版/);
+  assert.match(svg, /内衬刀版/);
+  const dxf = buildDXF(gCard);
+  assert.match(dxf, /封套刀版/);
+});

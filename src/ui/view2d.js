@@ -52,6 +52,12 @@ export function createView2D(svg, hooks) {
       o += `</g></g>`;
     }
     o += `</g>`;
+    const insSheets = (geo.sheets || []).filter((sh) => sh.kind === 'eva' || sh.kind === 'blister');
+    if (insSheets.length) {
+      o += `<g id="lyr-insert-tint" pointer-events="none">`;
+      for (const sh of insSheets) o += `<path d="${ringsD([sh.poly, ...(sh.holes || [])])}" fill="${sh.fill || '#23262d'}" fill-opacity="${sh.kind === 'blister' ? 0.14 : 0.16}" fill-rule="evenodd" stroke="none"/>`;
+      o += `</g>`;
+    }
     o += `<g id="lyr-glue" ${L.glue ? '' : 'display="none"'}>${geo.glue.map((g2) => `<path d="${ringsD([g2])}" fill="url(#hatch)" pointer-events="none"/>`).join('')}</g>`;
     if (L.finish !== false) {
       o += `<g id="lyr-finish" pointer-events="none">`;
@@ -115,8 +121,8 @@ export function createView2D(svg, hooks) {
     return o + `</g>`;
   }
   function fitView() {
-    if (!geo) return; const b = geo.bboxBleed; const x0 = Math.min(b.x, geo.bbox.x - 30), y1 = Math.max(b.y1, geo.bbox.y1 + 28);
-    const pad = 8; vb = { x: x0 - pad, y: b.y - pad, w: b.x1 - x0 + 2 * pad, h: y1 - b.y + 2 * pad };
+    if (!geo) return; const b = geo.bboxBleed; const x0 = Math.min(b.x, geo.bbox.x - 30), y0 = Math.min(b.y, ...((geo.marks || []).filter((m) => m.type === 'label').map((m) => m.y - 6))), y1 = Math.max(b.y1, geo.bbox.y1 + 28);
+    const pad = 8; vb = { x: x0 - pad, y: y0 - pad, w: b.x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad };
     const r = svg.getBoundingClientRect(); if (r.width && r.height) { const a = r.width / r.height, va = vb.w / vb.h; if (a > va) { const nw = vb.h * a; vb.x -= (nw - vb.w) / 2; vb.w = nw; } else { const nh = vb.w / a; vb.y -= (nh - vb.h) / 2; vb.h = nh; } }
     applyVB();
   }

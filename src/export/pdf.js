@@ -12,7 +12,7 @@ const esc = (s) => String(s).replace(/[\\()]/g, (m) => '\\' + m).replace(/[^\x20
 export function buildPDF(geo, { art = null, info = [], processLayers = [] } = {}) {
   const bb = geo.bbox, bl = geo.bboxBleed;
   const minX = Math.min(bl.x, bb.x - 30) - 8, maxX = Math.max(bl.x1 + 12, minX + 220);
-  const minY = bl.y - 12;
+  const minY = Math.min(bl.y, ...((geo.marks || []).filter((m) => m.type === 'label').map((m) => m.y - 6))) - 12;
   const infoH = Math.max(18, info.length * 4.8 + 6);
   const legendRows = Math.ceil((4 + processLayers.length) / 4);
   const legendH = infoH + 6 + legendRows * 5.2 + 4;
@@ -38,6 +38,15 @@ export function buildPDF(geo, { art = null, info = [], processLayers = [] } = {}
       s += 'S\nQ\n';
     }
     layer('ocGlue', s + 'Q');
+  }
+  const insSheets = (geo.sheets || []).filter((sh) => sh.kind === 'eva' || sh.kind === 'blister');
+  if (insSheets.length) {
+    let ts = 'q\n';
+    for (const sh of insSheets) {
+      ts += sh.kind === 'blister' ? '0.12 0.04 0 0 k\n' : '0 0 0 0.08 k\n';
+      ts += [sh.poly, ...(sh.holes || [])].map((r) => path(r, true)).join('\n') + '\nf*\n';
+    }
+    layer('ocLabels', ts + 'Q');
   }
   layer('ocBleed', `q 1 0.3 0 0 K 0.35 w [2 1.5] 0 d\n${geo.bleedRegion.map((r) => path(r, true)).join('\n')}\nS Q`);
   layer('ocCrease', `q /CSCrease CS 1 SCN 0.6 w [4 2.5] 0 d\n${geo.crease.map((l) => path(l)).join('\n')}\nS Q`);

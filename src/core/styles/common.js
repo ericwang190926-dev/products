@@ -96,9 +96,9 @@ export function hangHole(cx, cy, avail) {
  * Tray: base + 4 walls. Long walls (front/back on base bottom/top edges) carry glue corner flaps;
  * end walls (left/right) fold over (double) to cover them. Base is the root; walls fold to -z.
  */
-export function tray(b, { pre = '', x0, y0, A, B, D, t, double = true, faces = { base: 'bottom', front: 'front', back: 'back', left: 'left', right: 'right' }, root = {}, skipBackCorners = false, mirror = false }) {
+export function tray(b, { pre = '', x0, y0, A, B, D, t, thick = null, double = true, faces = { base: 'bottom', front: 'front', back: 'back', left: 'left', right: 'right' }, root = {}, skipBackCorners = false, mirror = false }) {
   const base = rect(x0, y0, A, B);
-  b.add(pre + 'base', base.poly, { face: faces.base, ...root });
+  b.add(pre + 'base', base.poly, { face: faces.base, thick, ...root });
   const f = Math.min(B * 0.45, Math.max(10, D * 0.8));
   const walls = {};
   // mirror: the model is shown rotated 180° about the vertical axis, so the flat-left wall ends up on the viewer's right
@@ -106,20 +106,20 @@ export function tray(b, { pre = '', x0, y0, A, B, D, t, double = true, faces = {
   const faceName = (n) => (mirror && n === 'left' ? faces.right : mirror && n === 'right' ? faces.left : faces[n]);
   for (const [n, e, fr] of wallDef) {
     const w = flap(e, D);
-    b.add(pre + n, w.poly, { parent: pre + 'base', hinge: w.hinge, kind: 'wall', face: faceName(n), faceRot: fr });
+    b.add(pre + n, w.poly, { parent: pre + 'base', hinge: w.hinge, kind: 'wall', face: faceName(n), faceRot: fr, thick });
     walls[n] = w;
     if ((n === 'front' || n === 'back') && !(skipBackCorners && n === 'back')) {
       for (const [k, se] of [['1', w.s1], ['2', w.s2]]) {
         const isStart = true; // side edge runs base → rim for s1, rim → base for s2
         const o = k === '1' ? { o1: Math.min(f * 0.3, D * 0.3), o2: 1 } : { o1: 1, o2: Math.min(f * 0.3, D * 0.3) };
         const cf = flap(se, f, o);
-        b.add(pre + n + 'C' + k, cf.poly, { parent: pre + n, hinge: cf.hinge, kind: 'corner', layer: 1 });
+        b.add(pre + n + 'C' + k, cf.poly, { parent: pre + n, hinge: cf.hinge, kind: 'corner', layer: 1, thick });
         b.glueArea(cf.poly);
       }
     }
     if ((n === 'left' || n === 'right') && double) {
       const iw = flap(w.far, D - t, { o1: 1, o2: 1 });
-      b.add(pre + n + 'In', iw.poly, { parent: pre + n, hinge: iw.hinge, angle: 180, kind: 'inner', layer: 2 });
+      b.add(pre + n + 'In', iw.poly, { parent: pre + n, hinge: iw.hinge, angle: 180, kind: 'inner', layer: 2, thick });
     }
   }
   return { base, walls, f };

@@ -10,6 +10,11 @@ import { resolveBoxDims, fmtSize } from './core/dims.js';
 import { usedProcesses, regionsByProcess } from './core/finish.js';
 import { buildGeometry } from './core/model.js';
 import { FACE_NAMES } from './core/builder.js';
+import {
+  INSERT_STYLES, INSERT_TYPES, SLEEVE_INNER_TYPES, EVA_THICKS, EVA_COLORS,
+  BLISTER_COLORS, CAVITY_SHAPES, INSERT_PAPER_KINDS, INSERT_PAPER_GSM,
+  INNER_GREY_GSM, INNER_WRAP_GSM,
+} from './core/insert.js';
 import { createView2D, elementSize } from './ui/view2d.js';
 import { createView3D } from './ui/view3d.js';
 import { renderFlat, imageCache } from './render/raster.js';
@@ -23,7 +28,7 @@ const state = {
   boxColor: '#ffffff', boardColor: '#f1ede4', faceColors: {}, elements: [], selected: null, selectedFace: 'front',
   selectedFinish: null, lamination: 'none', finishRegions: [], drawFinish: false, finishUid: 1, dimMode: 'outer',
   layers: { art: true, cut: true, crease: true, bleed: true, glue: true, dims: true, labels: true, finish: true, magnet: true },
-  dimsTouched: false, materialTouched: false,
+  dimsTouched: false, materialTouched: false, sleeveGhost: false,
 };
 function syncMaterial() {
   const r = resolvedThickness(state.mat);
@@ -64,6 +69,9 @@ function rebuild({ refit = false } = {}) {
   render2D({ fit: refit });
   view3d.setGeometry(geo, state, { refit });
   view3d.setFold(+$('#fold').value, +$('#open').value);
+  const ghostLbl = $('#lblSleeveGhost');
+  if (ghostLbl) ghostLbl.hidden = state.styleId !== 'sleeve' || geo.sleeveInner?.innerBox === 'none';
+  if ($('#sleeveGhost')) $('#sleeveGhost').checked = !!state.sleeveGhost;
   renderStruct(); renderArtPanel();
   const st = geo.style; const tag = state.dimMode === 'inner' ? '内尺寸' : '外尺寸'; $('#curStyle').textContent = `${st.name}　|　${tag} ${fmtDims()} mm　|　${materialShort(state.mat, state.t)}`;
   document.querySelectorAll('.card').forEach((c) => c.classList.toggle('on', c.dataset.id === state.styleId));
@@ -98,6 +106,9 @@ function selectStyle(id) {
   const st = STYLE_MAP[id]; state.styleId = id; state.params = {};
   if (!state.dimsTouched) state.dims = { ...st.defaults };
   if (!state.materialTouched) { state.mat = defaultMaterialFor(id); syncMaterial(); }
+  state.sleeveGhost = false;
+  if ($('#sleeveGhost')) $('#sleeveGhost').checked = false;
+  if ($('#open')) $('#open').value = id === 'sleeve' ? '0.4' : '0';
   rebuild({ refit: true });
 }
 
@@ -105,11 +116,13 @@ function selectStyle(id) {
 function num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : null; }
 function tip(label, hint) { return hint ? `<span class="tip" title="${escAttr(hint)}">${label}</span>` : label; }
 function escAttr(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function gsmPicks(id, values, current) {
+function gsmPicks(id, values, current, isParam = false) {
   const known = values.includes(+current);
-  let h = `<div class="gsm-picks" data-gsm-group="${id}">`;
-  for (const g of values) h += `<button type="button" class="gsm ${+current === g ? 'on' : ''}" data-gsm-group="${id}" data-gsm="${g}">${g}g</button>`;
-  h += `<label class="gsm-custom">其他<input type="number" data-gsm-custom="${id}" min="50" max="3000" step="1" value="${known ? '' : current}" placeholder="克重"/></label></div>`;
+  const attr = isParam ? 'data-param-gsm' : 'data-gsm-group';
+  const cattr = isParam ? 'data-param-gsm-custom' : 'data-gsm-custom';
+  let h = `<div class="gsm-picks" ${attr}="${id}">`;
+  for (const g of values) h += `<button type="button" class="gsm ${+current === g ? 'on' : ''}" ${attr}="${id}" data-gsm="${g}">${g}g</button>`;
+  h += `<label class="gsm-custom">其他<input type="number" ${cattr}="${id}" min="50" max="3000" step="1" value="${known ? '' : current}" placeholder="克重"/></label></div>`;
   return h;
 }
 function paramBlock(params, advanced) {
@@ -191,6 +204,74 @@ function renderStruct() {
     h += `<label class="${dir === 'short' ? 'on' : ''}"><input type="radio" name="openDir" value="short" ${dir === 'short' ? 'checked' : ''} hidden/><span class="nm">短边打开</span><span class="hp">从短的那一边打开，书脊在对面短边上，像从盒子的短头掀开。</span></label>`;
     h += `</div></div>`;
   }
+  if (st.id === 'sleeve') {
+    const si = geo.sleeveInner || { innerBox: 'rigid', greyGsm: 1000, wrapGsm: 157, paperGsm: 300 };
+    const ib = si.innerBox || 'rigid';
+    h += `<div class="sec" id="sleeveInnerSec"><h3>封套内盒</h3><div class="struct-opts">`;
+    for (const opt of SLEEVE_INNER_TYPES) {
+      h += `<label class="${ib === opt.id ? 'on' : ''}"><input type="radio" name="innerBox" value="${opt.id}" ${ib === opt.id ? 'checked' : ''} hidden/><span class="nm">${opt.name}</span><span class="hp">${opt.hint}</span></label>`;
+    }
+    h += `</div>`;
+    if (ib === 'rigid') {
+      h += `<div class="field"><span class="lbl">${tip('内盒灰板克重', '内盒骨架的灰板克重，常用 1000g 或 1200g。')}</span>${gsmPicks('innerGreyGsm', INNER_GREY_GSM, si.greyGsm, true)}</div>`;
+      h += `<div class="field"><span class="lbl">${tip('内盒裱纸克重', '贴在内盒灰板外面的铜版纸，常用 157g。')}</span>${gsmPicks('innerWrapGsm', INNER_WRAP_GSM, si.wrapGsm, true)}</div>`;
+    } else if (ib === 'folding') {
+      h += `<div class="field"><span class="lbl">${tip('内盒铜版纸克重', '折叠内盒用的铜版纸克重，常用 300g 或 350g。')}</span>${gsmPicks('innerPaperGsm', INSERT_PAPER_GSM, si.paperGsm, true)}</div>`;
+    }
+    if (ib !== 'none' && si.outer) {
+      h += `<div class="summary" style="margin-top:8px">内盒外尺寸（自动按封套减去板厚和缝隙）：<b>${si.outer.L.toFixed(1)} × ${si.outer.W.toFixed(1)} × ${si.outer.H.toFixed(1)}</b> mm</div>`;
+    }
+    h += `</div>`;
+  }
+  if (INSERT_STYLES.has(st.id)) {
+    const insType = c.p.insertType || 'none';
+    const spec = geo.insertSpec;
+    h += `<div class="sec" id="insertSec"><h3>${tip('内衬', '放在盒里面固定产品的托盘或隔卡，外尺寸会按盒内空间自动算好。')}</h3>`;
+    h += `<div class="chips" id="insertTypes">`;
+    for (const it of INSERT_TYPES) h += `<span class="chip ${insType === it.id ? 'on' : ''}" data-insert-type="${it.id}" title="${escAttr(it.hint)}">${it.name}</span>`;
+    h += `</div>`;
+    if (spec) {
+      h += `<div class="summary" style="margin-top:8px">内衬外尺寸已自动适配盒内空间：<b>${spec.insL.toFixed(1)} × ${spec.insW.toFixed(1)}</b> mm（盒内深约 ${spec.insH.toFixed(1)} mm）</div>`;
+      if (spec.type === 'eva') {
+        const knownT = EVA_THICKS.includes(+spec.evaThick);
+        h += `<div class="field"><span class="lbl">EVA 厚度 (mm)</span><div class="gsm-picks">`;
+        for (const tv of EVA_THICKS) h += `<button type="button" class="gsm ${+spec.evaThick === tv ? 'on' : ''}" data-eva-thick="${tv}">${tv}mm</button>`;
+        h += `<label class="gsm-custom">其他<input type="number" data-param="evaThick" min="3" max="${Math.max(10, Math.floor(spec.insH))}" step="1" value="${knownT ? '' : spec.evaThick}" placeholder="mm"/></label></div></div>`;
+        h += `<div class="field"><span class="lbl">EVA 颜色</span><div class="chips">`;
+        for (const cl of EVA_COLORS) h += `<span class="chip ${spec.evaColor === cl.id ? 'on' : ''}" data-eva-color="${cl.id}">${cl.name}</span>`;
+        h += `</div></div>`;
+      } else if (spec.type === 'blister') {
+        h += `<div class="field"><span class="lbl">吸塑材质/颜色</span><div class="chips">`;
+        for (const cl of BLISTER_COLORS) h += `<span class="chip ${spec.blisterColor === cl.id ? 'on' : ''}" data-blister-color="${cl.id}">${cl.name}</span>`;
+        h += `</div></div>`;
+        h += `<div class="row"><label>凹槽深度 (mm)</label><input type="number" step="1" min="4" max="${Math.floor(spec.insH)}" data-param="blisterDepth" placeholder="自动 ${spec.blisterDepth.toFixed(0)}" value="${state.params.blisterDepth ?? ''}"/></div>`;
+        h += `<div class="note">提示：吸塑需开吸塑模具成型，导出图纸为外框与凹槽尺寸参考，不作直接裁切刀版。</div>`;
+      } else if (spec.type === 'carton' || spec.type === 'card') {
+        h += `<div class="field"><span class="lbl">内衬用纸</span><div class="chips">`;
+        for (const pk of INSERT_PAPER_KINDS) h += `<span class="chip ${spec.paperKind === pk.id ? 'on' : ''}" data-ins-paper="${pk.id}">${pk.name}</span>`;
+        h += `</div></div>`;
+        h += `<div class="field"><span class="lbl">纸张克重</span>${gsmPicks('insPaperGsm', INSERT_PAPER_GSM, spec.paperGsm, true)}</div>`;
+        if (spec.type === 'carton') {
+          h += `<div class="row"><label>内托高度 (mm)</label><input type="number" step="1" min="6" max="${Math.floor(spec.insH)}" data-param="insPlatH" placeholder="自动 ${spec.platH.toFixed(0)}" value="${state.params.insPlatH ?? ''}"/></div>`;
+        }
+      }
+      h += `<div class="field"><span class="lbl">产品槽位形状</span><div class="chips">`;
+      for (const cs of CAVITY_SHAPES) h += `<span class="chip ${spec.shape === cs.id ? 'on' : ''}" data-ins-shape="${cs.id}">${cs.name}</span>`;
+      h += `</div></div>`;
+      h += `<div class="row"><label>槽位数量</label><input type="number" step="1" min="1" max="12" data-param="insCount" value="${state.params.insCount ?? spec.count}"/></div>`;
+      h += `<div class="field"><span class="lbl">槽位排布</span><div class="chips">`;
+      h += `<span class="chip ${spec.align === 'across' ? 'on' : ''}" data-ins-align="across">居中并排（沿宽分布）</span>`;
+      h += `<span class="chip ${spec.align === 'along' ? 'on' : ''}" data-ins-align="along">居中顺排（沿长分布）</span>`;
+      h += `</div></div>`;
+      if (spec.shape === 'circle') {
+        h += `<div class="row"><label>孔径 Ø (mm)</label><input type="number" step="1" min="4" data-param="insCavL" placeholder="自动 ${spec.cavL.toFixed(0)}" value="${state.params.insCavL ?? ''}"/></div>`;
+      } else {
+        h += `<div class="row"><label>槽长 (mm)</label><input type="number" step="1" min="4" data-param="insCavL" placeholder="自动 ${spec.cavL.toFixed(0)}" value="${state.params.insCavL ?? ''}"/></div>`;
+        h += `<div class="row"><label>槽宽 (mm)</label><input type="number" step="1" min="4" data-param="insCavW" placeholder="自动 ${spec.cavW.toFixed(0)}" value="${state.params.insCavW ?? ''}"/></div>`;
+      }
+    }
+    h += `</div>`;
+  }
   const vis = paramBlock(st.params, false);
   if (vis) h += `<div class="sec"><h3>这个盒子还可以调</h3>${vis}</div>`;
 
@@ -236,6 +317,11 @@ function renderStruct() {
   h += `<div class="sec"><h3>算出来的尺寸</h3><div class="info">`;
   h += `外尺寸 <b>${fmtSize(c.outer || { L: c.L + 2 * tt, W: c.W + 2 * tt, H: c.H + 2 * tt }, ikeys)}</b> mm<br/>`;
   h += `内尺寸（里面能放的产品） <b>${fmtSize(c.inner || { L: c.L, W: c.W, H: c.H }, ikeys)}</b> mm<br/>`;
+  if (geo.sleeveInner && geo.sleeveInner.innerBox !== 'none' && geo.sleeveInner.outer) {
+    const so = geo.sleeveInner.outer;
+    h += `内盒外尺寸 <b>${so.L.toFixed(1)} × ${so.W.toFixed(1)} × ${so.H.toFixed(1)}</b> mm<br/>`;
+  }
+  if (geo.insertSpec) h += `内衬外尺寸 <b>${geo.insertSpec.insL.toFixed(1)} × ${geo.insertSpec.insW.toFixed(1)}</b> mm<br/>`;
   h += `刀版展开 <b>${bb.w.toFixed(1)} × ${bb.h.toFixed(1)}</b> mm<br/>算上多印边 <b>${bl.w.toFixed(1)} × ${bl.h.toFixed(1)}</b> mm<br/>`;
   const cutLen = geo.cut.reduce((s, l) => s + l.slice(1).reduce((a, p, i) => a + Math.hypot(p[0] - l[i][0], p[1] - l[i][1]), 0), 0);
   const crLen = geo.crease.reduce((s, l) => s + Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]), 0);
@@ -268,6 +354,7 @@ $('#tabStruct').addEventListener('input', (e) => {
     else if (el.id === 'bleed') { const v = num(el.value); if (v !== null && v >= 0) { state.bleed = v; rebuild(); } }
     else if (el.id === 'turnIn') { const v = num(el.value); if (v && v > 0) { state.mat.turnIn = v; state.materialTouched = true; rebuild(); } }
     else if (el.dataset.gsmCustom) { const v = num(el.value); if (v && v > 0) { state.mat[el.dataset.gsmCustom] = v; applyMatChange(); } }
+    else if (el.dataset.paramGsmCustom) { const v = num(el.value); if (v && v > 0) { state.params[el.dataset.paramGsmCustom] = v; rebuild(); } }
     else if (el.dataset.param) { const k = el.dataset.param; if (el.type === 'checkbox') state.params[k] = el.checked; else state.params[k] = el.value === '' ? null : num(el.value); rebuild(); }
     else if (el.dataset.proc) { toggleProcess(el.dataset.proc, el.checked); }
   }, el.type === 'checkbox' ? 0 : 350);
@@ -284,10 +371,32 @@ $('#tabStruct').addEventListener('change', (e) => {
   if (el.name === 'flute') { state.mat.flute = el.value; applyMatChange(); }
   if (el.name === 'lidType') { state.params.lidType = el.value; if (el.value === 'full') delete state.params.lidH; rebuild({ refit: true }); }
   if (el.name === 'openDir') { state.params.openDir = el.value; rebuild({ refit: true }); }
+  if (el.name === 'innerBox') {
+    state.params.innerBox = el.value;
+    if (el.value === 'none') { state.sleeveGhost = false; if ($('#open')) $('#open').value = '0'; }
+    else if ($('#open') && +$('#open').value === 0) $('#open').value = '0.4';
+    rebuild({ refit: true });
+  }
 });
 $('#tabStruct').addEventListener('click', (e) => {
-  const gsmBtn = e.target.closest('button.gsm');
+  const paramGsmBtn = e.target.closest('[data-param-gsm]');
+  if (paramGsmBtn && paramGsmBtn.tagName === 'BUTTON') { state.params[paramGsmBtn.dataset.paramGsm] = +paramGsmBtn.dataset.gsm; rebuild(); return; }
+  const gsmBtn = e.target.closest('button.gsm[data-gsm-group]');
   if (gsmBtn) { state.mat[gsmBtn.dataset.gsmGroup] = +gsmBtn.dataset.gsm; applyMatChange(); return; }
+  const insBtn = e.target.closest('[data-insert-type]');
+  if (insBtn) { state.params.insertType = insBtn.dataset.insertType; rebuild({ refit: true }); return; }
+  const evaT = e.target.closest('[data-eva-thick]');
+  if (evaT) { state.params.evaThick = +evaT.dataset.evaThick; rebuild(); return; }
+  const evaC = e.target.closest('[data-eva-color]');
+  if (evaC) { state.params.evaColor = evaC.dataset.evaColor; rebuild(); return; }
+  const blC = e.target.closest('[data-blister-color]');
+  if (blC) { state.params.blisterColor = blC.dataset.blisterColor; rebuild(); return; }
+  const insP = e.target.closest('[data-ins-paper]');
+  if (insP) { state.params.insPaperKind = insP.dataset.insPaper; rebuild(); return; }
+  const insSh = e.target.closest('[data-ins-shape]');
+  if (insSh) { state.params.insShape = insSh.dataset.insShape; rebuild(); return; }
+  const insAl = e.target.closest('[data-ins-align]');
+  if (insAl) { state.params.insAlign = insAl.dataset.insAlign; rebuild(); return; }
   const faceKind = e.target.closest('[data-face-kind]');
   if (faceKind) { state.mat.faceKind = faceKind.dataset.faceKind; if (state.mat.structure === 'carton') state.mat.faceGsm = state.mat.boardGsm; applyMatChange(); return; }
   const sp = e.target.closest('[data-special]');
@@ -483,6 +592,11 @@ $('#fold').addEventListener('input', () => view3d.setFold(+$('#fold').value, +$(
 $('#open').addEventListener('input', () => view3d.setFold(+$('#fold').value, +$('#open').value));
 $('#playFold').onclick = () => view3d.playFold((v) => ($('#fold').value = v));
 $('#resetView').onclick = () => view3d.resetView();
+$('#sleeveGhost').addEventListener('change', () => {
+  state.sleeveGhost = $('#sleeveGhost').checked;
+  view3d.setGeometry(geo, state, { refit: false });
+  view3d.setFold(+$('#fold').value, +$('#open').value);
+});
 
 // ---------------- export / project ----------------
 const baseName = () => `${geo.style.id}_${fmtDims().replace(/ × /g, 'x')}mm`;
@@ -498,7 +612,7 @@ function infoLines() {
     style: geo.style, dims: state.dims, mat: state.mat, t: state.t, faceT: state.faceT,
     bleed: state.bleed, bbox: geo.bbox, bboxBleed: geo.bboxBleed,
     lamination: state.lamination, finishRegions: state.finishRegions,
-    outer: c.outer, inner: c.inner, lidType: c.p?.lidType, openDir: c.p?.openDir,
+    outer: c.outer, inner: c.inner, lidType: c.p?.lidType, openDir: c.p?.openDir, sleeveInner: geo.sleeveInner, insertSpec: geo.insertSpec,
   });
   const day = new Date();
   const local = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;

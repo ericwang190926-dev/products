@@ -41,6 +41,13 @@ export function paintArtwork(ctx, geo, state) {
 }
 
 export function drawLines(ctx, geo, { lw = 0.3, labels = true, dims = true, bleed = true } = {}) {
+  for (const sh of (geo.sheets || []).filter((s) => s.kind === 'eva' || s.kind === 'blister')) {
+    ctx.save();
+    ctx.fillStyle = sh.kind === 'blister' ? 'rgba(96, 165, 250, 0.16)' : 'rgba(35, 38, 45, 0.15)';
+    ringsPath(ctx, [sh.poly, ...(sh.holes || [])]);
+    ctx.fill('evenodd');
+    ctx.restore();
+  }
   const seg = (list, style, dash) => { ctx.strokeStyle = style; ctx.setLineDash(dash); ctx.beginPath(); for (const l of list) { l.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); } ctx.stroke(); };
   ctx.lineWidth = lw;
   if (bleed) { ctx.lineWidth = lw * 0.7; ctx.strokeStyle = '#2b7bd6'; ctx.setLineDash([1.5, 1]); ringsPath(ctx, geo.bleedRegion); ctx.stroke(); ctx.lineWidth = lw; }
@@ -57,12 +64,18 @@ export function drawLines(ctx, geo, { lw = 0.3, labels = true, dims = true, blee
       const fs = Math.max(1.5, Math.min(6, Math.min(w, h) * 0.18)); ctx.font = `${fs}px sans-serif`;
       ctx.fillText(t, (Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...ys) + Math.min(...ys)) / 2);
     }
+    ctx.fillStyle = 'rgba(55,65,81,0.85)'; ctx.font = '3.6px "Noto Sans CJK SC", sans-serif';
+    for (const m of geo.marks || []) {
+      if (m.type === 'label' && m.text) ctx.fillText(m.text, m.x, m.y);
+    }
   }
 }
 
 /** Render artwork (and optionally the dieline) to a canvas. ppm = pixels per millimetre. */
 export function renderFlat(geo, state, { ppm = 4, lines = false, maxPx = 4096, background = null } = {}) {
-  const bb = geo.bboxBleed;
+  const b0 = geo.bboxBleed;
+  const labelMinY = lines ? Math.min(b0.y, ...((geo.marks || []).filter((m) => m.type === 'label').map((m) => m.y - 6))) : b0.y;
+  const bb = labelMinY < b0.y ? { ...b0, y: labelMinY, h: b0.y1 - labelMinY } : b0;
   ppm = Math.min(ppm, maxPx / Math.max(bb.w, bb.h));
   const cv = document.createElement('canvas'); cv.width = Math.ceil(bb.w * ppm); cv.height = Math.ceil(bb.h * ppm);
   const ctx = cv.getContext('2d');

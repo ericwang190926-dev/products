@@ -8,9 +8,10 @@ export function makeContext(style, { L, W, H, t, params = {}, wrap = false, turn
   const sizes = resolveBoxDims(style, { L, W: W0, H, t, dimMode, params });
   const i = sizes.inner;
   const c = {
+    styleId: style.id,
     L: i.L, W: i.W, H: i.H, t,
     A: sizes.A, B: sizes.B, D: sizes.D,
-    p: {}, wrap: !!wrap, turnIn: turnIn ?? 15, faceT: faceT || 0,
+    p: { ...params }, wrap: !!wrap, turnIn: turnIn ?? 15, faceT: faceT || 0,
     dimMode: sizes.dimMode, inner: sizes.inner, outer: sizes.outer, user: { L, W: W0, H },
   };
   if (sizes.lidA) { c.lidA = sizes.lidA; c.lidB = sizes.lidB; c.lidD = sizes.lidD; }

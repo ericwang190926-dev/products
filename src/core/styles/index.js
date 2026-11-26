@@ -54,12 +54,16 @@ export const STYLES = [
     build: O.drawer, expect: O.drawerExpect, view3d: { rx: -90, ry: 0 },
   },
   {
-    id: 'sleeve', name: '封套盒', en: 'Sleeve', category: 'rigid', desc: '两端开口的套筒，可套在内盒/托盘外。H 为封套宽度。', dims: { L: '长 L', W: '宽 W', H: '封套宽 H' }, defaults: { L: 200, W: 80, H: 120 },
-    params: [glueP], build: O.sleeve, expect: O.sleeveExpect,
+    id: 'sleeve', name: '封套盒', en: 'Sleeve & Tray', category: 'rigid', desc: '外封套 + 内盒两件套：内盒可选灰板裱纸内盒或铜版纸折叠内盒，H 为封套宽度。', dims: { L: '长 L', W: '宽 W', H: '封套宽 H' }, defaults: { L: 200, W: 80, H: 120 },
+    params: [
+      glueP,
+      { key: 'clear', label: '内盒缝隙', hint: '封套和内盒之间预留的间隙，太小会抽不动。', def: (c) => (c.t >= 1 || (c.p?.innerBox || 'rigid') === 'rigid' ? 1 : 0.5) },
+    ],
+    build: O.sleeve, expect: O.sleeveExpect, view3d: { rx: -90, ry: 0 },
   },
   {
     id: 'band', name: '腰封', en: 'Belly Band', category: 'rigid', desc: '窄封套，套在盒子中段做品牌/促销信息。H 为腰封宽度。', dims: { L: '长 L', W: '宽 W', H: '腰封宽 H' }, defaults: { L: 200, W: 80, H: 50 },
-    params: [glueP], build: O.sleeve, expect: O.sleeveExpect,
+    params: [glueP], build: O.band, expect: O.sleeveExpect,
   },
   {
     id: 'mailer', name: '飞机盒', en: 'Mailer Box', category: 'ship', desc: '电商快递常用，双层侧墙，盖前插舌，不用胶水。', dims: LWH, defaults: { L: 220, W: 160, H: 60 }, material: 'eflute',

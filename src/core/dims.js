@@ -53,6 +53,9 @@ export function outerFromInner(styleId, { L, W, H, t, params = {} }) {
   if (styleId === 'drawer') {
     return { L: L + 2 * t, W: W + 3 * t + 2 * cl, H: H + 3 * t + cl };
   }
+  if (styleId === 'sleeve' || styleId === 'band') {
+    return { L: L + 2 * t, W: W + 2 * t, H };
+  }
   return simpleFromInner(L, W, H, t);
 }
 
@@ -87,6 +90,10 @@ export function innerFromOuter(styleId, { L, W, H, t, params = {} }) {
     const As = W - t, Ds = H - t, Ls = L - t;
     const B = As - 2 * t - 2 * cl, D = Ds - 2 * t - cl, A = Ls - t;
     return { L: clampMin(A - t), W: clampMin(B - t), H: clampMin(D - t) };
+  }
+  if (styleId === 'sleeve' || styleId === 'band') {
+    // Open-ended tube along H: H has no top/bottom boards.
+    return { L: clampMin(L - 2 * t), W: clampMin(W - 2 * t), H: clampMin(H) };
   }
   return simpleInnerFromOuter(L, W, H, t);
 }
