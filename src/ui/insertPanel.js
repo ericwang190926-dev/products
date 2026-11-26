@@ -86,7 +86,7 @@ export function insertPanelHTML(spec, { state, tip, escAttr, gsmPicks, insType }
     if (spec.type === 'eva') {
       h += `<label>${tip('深度', 'EVA 里这个槽开多深。不填或填满厚度就是开通；比厚度小就是不通的凹位。')}</label>${numIn(i, 'depth', s.depth ?? '', { min: 1, max: spec.evaThick, step: 1, ph: '通孔' })}<span class="chips mini"><span class="chip ${s.through ? 'on' : ''}" data-slot-set data-slot="${i}" data-key="depth" data-val="">通孔</span></span>`;
     } else if (spec.type === 'blister') {
-      h += `<label>${tip('槽深', '吸塑里这个槽凹下去多深，默认等于整体高度。')}</label>${numIn(i, 'depth', s.depth ?? '', { min: 3, max: spec.insH, step: 1, ph: `整体 ${f1(spec.blisterDepth)}` })}<span></span>`;
+      h += `<label>${tip('槽深', '吸塑里这个槽凹下去多深，默认等于整体高度。')}</label>${numIn(i, 'depth', s.depth ?? '', { min: 3, max: spec.insH, step: 1, ph: `整体 ${f1(spec.blisterDepth)}` })}<span></span><span></span>`;
     }
     h += `</div>`;
     const l = s.poly.reduce((a, p) => Math.min(a, p[0]), Infinity), r = spec.insL - s.poly.reduce((a, p) => Math.max(a, p[0]), -Infinity);

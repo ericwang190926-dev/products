@@ -115,3 +115,5 @@ details.advanced[open] > summary:before { content:"▾ "; }
 .helpers > summary { cursor:pointer; color:var(--sub); font-size:12px; }
 .helpers .btns { margin:6px 0; display:flex; flex-wrap:wrap; gap:6px; }
 button.small.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+.slot-grid > .chips { grid-column: span 2; }

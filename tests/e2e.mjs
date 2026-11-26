@@ -239,13 +239,13 @@ await page.click('#propTabs button[data-tab="struct"]'); await page.waitForTimeo
 await page.click('.card[data-id="lidbase"]'); await page.waitForTimeout(450);
 await page.click('#useDefaults'); await page.waitForTimeout(450);
 await page.click('[data-insert-type="eva"]'); await page.waitForTimeout(500);
-await page.fill('input[data-param="insCount"]', '2'); await page.waitForTimeout(600);
+await page.click('[data-slot-dup="0"]'); await page.waitForTimeout(600);
 await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
 await setMode('3d'); await setFold(1, 0.95); await page.waitForTimeout(600);
 await page.locator('#v3d').screenshot({ path: `${SHOTS}/eva_insert_3d.png` });
 ok('EVA insert renders on 天地盒 with 2 cavities', await page.evaluate(() => {
   const g = window.__app.geo;
-  return g.insertSpec?.type === 'eva' && g.insertSpec.count === 2 && g.extras3d.some((e) => e.type === 'insert-eva' && e.holes.length === 2);
+  return g.insertSpec?.type === 'eva' && g.insertSpec.count === 2 && g.extras3d.some((e) => e.type === 'insert-eva' && e.holes.length === 2) && (g.insertSpec.slots[0].x !== g.insertSpec.slots[1].x || g.insertSpec.slots[0].y !== g.insertSpec.slots[1].y);
 }));
 
 // 纸盒 insert dieline + 纸卡 insert dieline
@@ -264,6 +264,102 @@ await page.screenshot({ path: `${SHOTS}/card_insert_dieline.png`, clip: await pa
 ok('纸卡 insert generates card dieline', await page.evaluate(() => !!window.__app.geo.byId.insCard && window.__app.geo.byId.insCard.holes.length === 2));
 await setMode('3d'); await page.waitForTimeout(300);
 
+// ---- 内衬：每个槽单独设置（厚度 / 形状 / 大小 / 位置 / 深度 / 手扣位） ----
+const slotsNow = () => page.evaluate(() => window.__app.geo.insertSpec.slots.map((q) => ({ shape: q.shape, w: q.w, h: q.h, x: q.x, y: q.y, rot: q.rot, depth: q.depth, notch: q.notch, through: q.through, r: q.r })));
+await page.click('#propTabs button[data-tab="struct"]');
+await page.click('[data-insert-type="eva"]'); await page.waitForTimeout(500);
+ok('槽位编辑：每个槽一张卡片', await page.locator('.slot[data-slot-card]').count() === 2, `${await page.locator('.slot[data-slot-card]').count()} cards`);
+await page.click('[data-slot-add]'); await page.waitForTimeout(600);
+ok('槽位编辑：可以添加槽', (await slotsNow()).length === 3);
+await page.click('summary[data-slot-select="1"]'); await page.waitForTimeout(300);
+await page.fill('input[data-slot="1"][data-key="w"]', '55'); await page.waitForTimeout(800);
+let sl = await slotsNow();
+ok('槽位编辑：改一个槽的长度不影响其他槽', sl[1].w === 55 && sl[0].w !== 55 && sl[2].w !== 55, JSON.stringify(sl.map((q) => q.w)));
+await page.click('[data-slot-set][data-slot="1"][data-key="shape"][data-val="oblong"]'); await page.waitForTimeout(500);
+await page.fill('input[data-slot="1"][data-key="rot"]', '90'); await page.waitForTimeout(800);
+sl = await slotsNow();
+ok('槽位编辑：单独改形状和旋转（长圆槽 90°）', sl[1].shape === 'oblong' && sl[1].rot === 90 && sl[0].shape === 'roundRect', `${sl[1].shape} ${sl[1].rot}`);
+await page.click('input[data-slot="1"][data-key="notch"]'); await page.waitForTimeout(600);
+ok('槽位编辑：取物手扣位', (await slotsNow())[1].notch === true && (await page.evaluate(() => window.__app.geo.insertSpec.slots[1].poly.length)) > 20);
+await page.fill('input[data-slot="1"][data-key="depth"]', '8'); await page.waitForTimeout(800);
+sl = await slotsNow();
+ok('槽位编辑：EVA 单槽深度（不通凹位）', sl[1].depth === 8 && sl[1].through === false && sl[0].through === true);
+await page.click('[data-slot-layout="distX"]'); await page.waitForTimeout(500);
+await page.click('[data-slot-layout="centerAll"]'); await page.waitForTimeout(500);
+ok('排布小工具：水平均分 / 整体居中', await page.evaluate(() => { const sp = window.__app.geo.insertSpec; const xs = sp.slots.map((q) => q.poly.flat().filter((_, i) => i % 2 === 0)); const lo = Math.min(...xs.flat()), hi = Math.max(...xs.flat()); return Math.abs((lo + hi) / 2 - sp.insL / 2) < 0.5; }));
+await page.click('[data-slot-del="1"]'); await page.waitForTimeout(500);
+ok('槽位编辑：可以删除槽', (await slotsNow()).length === 2);
+
+// 厚度选项
+await page.click('[data-eva-thick="25"]'); await page.waitForTimeout(500);
+ok('EVA 厚度 25mm', await page.evaluate(() => window.__app.geo.insertSpec.evaThick === 25 && window.__app.geo.extras3d.some((e) => e.type === 'insert-eva' && e.depth === 25)));
+await page.click('[data-insert-type="blister"]'); await page.waitForTimeout(500);
+await page.click('[data-set-param="blisterSheet"][data-val="0.8"]'); await page.waitForTimeout(500);
+ok('吸塑片材厚度 0.8mm', await page.evaluate(() => window.__app.geo.insertSpec.blisterSheet === 0.8 && window.__app.geo.extras3d.some((e) => e.type === 'insert-blister' && e.sheet === 0.8)));
+await page.click('[data-insert-type="card"]'); await page.waitForTimeout(500);
+await page.fill('input[data-param="insCardLift"]', '6'); await page.waitForTimeout(800);
+ok('纸卡离盒底高度', await page.evaluate(() => window.__app.geo.insertSpec.cardLift === 6));
+await page.fill('input[data-param="insCardLift"]', ''); await page.waitForTimeout(600);
+
+// 固定一组 3 个自定义槽：EVA 3D、纸卡刀版、2D 拖动
+await page.evaluate(() => {
+  const a = window.__app; const sp = a.geo.insertSpec; const L = sp.insL, W = sp.insW;
+  a.state.params.insSlots = [
+    { shape: 'roundRect', w: 84, h: 46, r: 9, rot: 0, depth: null, x: L * 0.30, y: W * 0.32, notch: true, notchSide: 'top', notchR: 9 },
+    { shape: 'circle', w: 36, h: 36, rot: 0, depth: null, x: L * 0.72, y: W * 0.30, notch: false },
+    { shape: 'oblong', w: 72, h: 24, rot: 0, depth: 12, x: L * 0.66, y: W * 0.74, notch: false },
+  ];
+  a.state.params.evaThick = 20; a.state.params.insertType = 'eva'; a.state.selectedSlot = 1; a.rebuild();
+});
+await page.waitForTimeout(800);
+await page.click('#propTabs button[data-tab="struct"]');
+await page.setViewportSize({ width: 1600, height: 1750 }); await page.waitForTimeout(400);
+await page.evaluate(() => document.querySelector('#insertSec').scrollIntoView({ block: 'start' })); await page.waitForTimeout(300);
+await page.locator('#props').screenshot({ path: `${SHOTS}/insert_panel_ui.png` });
+await page.setViewportSize({ width: 1600, height: 900 }); await page.waitForTimeout(300);
+ok('3 个自定义槽（形状 / 大小 / 深度各不相同）', await page.evaluate(() => { const q = window.__app.geo.insertSpec.slots; return q.length === 3 && new Set(q.map((s) => s.shape)).size === 3 && q[2].through === false && q[0].notch; }));
+await setMode('3d'); await setFold(1, 1); await page.waitForTimeout(700);
+{
+  const vb = await page.locator('#v3d').boundingBox();
+  await page.mouse.move(vb.x + vb.width * 0.5, vb.y + vb.height * 0.45); await page.mouse.down();
+  for (let i = 1; i <= 10; i++) { await page.mouse.move(vb.x + vb.width * 0.5, vb.y + vb.height * 0.45 + i * 9); await page.waitForTimeout(25); }
+  await page.mouse.up(); await page.waitForTimeout(600);
+}
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/eva_custom_slots_3d.png` });
+await page.locator('#resetView').click(); await page.waitForTimeout(200);
+
+await page.click('#propTabs button[data-tab="struct"]');
+await page.click('[data-insert-type="card"]'); await page.waitForTimeout(600);
+await setMode('2d'); await page.waitForTimeout(500);
+const zoomToInsert = async (steps = 6) => {
+  const pt = await page.evaluate(() => {
+    const sp = window.__app.geo.insertSpec; const svg = document.querySelector('#svg2d');
+    const p = svg.createSVGPoint(); p.x = sp.edit.ox + sp.insL / 2; p.y = sp.edit.oy + sp.insW / 2;
+    const q = p.matrixTransform(svg.getScreenCTM()); return { x: q.x, y: q.y };
+  });
+  await page.mouse.move(pt.x, pt.y);
+  for (let i = 0; i < steps; i++) { await page.mouse.wheel(0, -120); await page.waitForTimeout(30); }
+  await page.waitForTimeout(250);
+};
+const settle = async () => { await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))); await page.waitForTimeout(350); };
+await zoomToInsert(6); await settle();
+await page.screenshot({ path: `${SHOTS}/card_slots_dieline.png`, clip: await page.locator('#v2d').boundingBox() });
+ok('纸卡刀版带 3 个自定义槽孔', await page.evaluate(() => window.__app.geo.byId.insCard.holes.length === 3 && window.__app.geo.cut.length > 0));
+
+// 在 2D 里拖动槽
+const slotBefore = (await slotsNow())[1];
+const sb = await page.locator('#svg2d [data-slot="1"]').boundingBox();
+const cx = sb.x + sb.width / 2, cy = sb.y + sb.height / 2;
+await page.mouse.move(cx, cy); await page.mouse.down();
+for (let i = 1; i <= 12; i++) { await page.mouse.move(cx - i * 6, cy + i * 3.2); await page.waitForTimeout(20); }
+await settle();
+await page.screenshot({ path: `${SHOTS}/slot_drag_2d.png`, clip: await page.locator('#v2d').boundingBox() });
+const live = await page.inputValue('input[data-slot="1"][data-key="x"]');
+await page.mouse.up(); await page.waitForTimeout(700);
+const slotAfter = (await slotsNow())[1];
+ok('2D 拖动槽：位置改变并写回数值', slotAfter.x < slotBefore.x - 1 && slotAfter.y > slotBefore.y + 1 && Math.abs(parseFloat(live) - slotAfter.x) < 0.6, `x ${slotBefore.x.toFixed(1)}→${slotAfter.x} y ${slotBefore.y.toFixed(1)}→${slotAfter.y}`);
+ok('2D 拖动槽：只动被拖的槽', await page.evaluate(() => { const q = window.__app.geo.insertSpec.slots; return Math.abs(q[0].x - window.__app.geo.insertSpec.insL * 0.30) < 0.02; }));
+await page.click('#zoomFit'); await setMode('3d');
 
 await page.click('.card[data-id="hanger"]'); await page.waitForTimeout(400);
 await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(500);
