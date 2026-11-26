@@ -3,7 +3,7 @@ import { centroid } from './geom.js';
 
 export const to3 = (p) => new Vector3(p[0], -p[1], 0);
 
-function hingeMatrix(panel, angleDeg) {
+function hingeRotation(panel, angleDeg) {
   const [a, b] = panel.hinge;
   const A = to3(a), B = to3(b);
   const axis = B.clone().sub(A).normalize();
@@ -11,8 +11,35 @@ function hingeMatrix(panel, angleDeg) {
   // positive angle = child moves to -z (away from printed side, which faces +z when flat)
   const zdir = new Vector3().crossVectors(axis, c).z;
   const sign = zdir > 0 ? -1 : 1;
-  const R = new Matrix4().makeRotationAxis(axis, sign * (angleDeg * Math.PI) / 180);
-  return new Matrix4().makeTranslation(A.x, A.y, A.z).multiply(R).multiply(new Matrix4().makeTranslation(-A.x, -A.y, -A.z));
+  const rad = sign * (angleDeg * Math.PI) / 180;
+  const Rot = new Matrix4().makeRotationAxis(axis, rad);
+  const R = new Matrix4().makeTranslation(A.x, A.y, A.z).multiply(Rot).multiply(new Matrix4().makeTranslation(-A.x, -A.y, -A.z));
+  return { R, Rot };
+}
+
+/** Midplane rotation about the crease. Thickness compensation is added in hingeMatrix. */
+function hingeMid(panel, angleDeg) {
+  return hingeRotation(panel, angleDeg).R;
+}
+
+/**
+ * Fold about the crease, then shift the child so printed (outer) faces meet.
+ * Midplane-only rotation leaves a gap of t·sin(θ/2) between printed faces at the crease
+ * because each face is offset ±t/2 along its own normal. Translating the child by
+ * (t_parent/2)·n_parent − (t_child/2)·n_child closes that gap for any fold angle.
+ * Fades out from 135° to 180° so fold-backs still land on the unprinted side.
+ */
+function hingeMatrix(panel, angleDeg, tParent = 0, tChild = 0) {
+  const { R, Rot } = hingeRotation(panel, angleDeg);
+  const tP = tParent || 0, tC = tChild || 0;
+  if (!tP && !tC) return R;
+  const abs = Math.abs(angleDeg);
+  const k = abs <= 135 ? 1 : Math.max(0, 1 - (abs - 135) / 45);
+  if (k === 0) return R;
+  const nP = new Vector3(0, 0, 1);
+  const nC = new Vector3(0, 0, 1).transformDirection(Rot);
+  const shift = nP.multiplyScalar(k * tP / 2).sub(nC.multiplyScalar(k * tC / 2));
+  return new Matrix4().makeTranslation(shift.x, shift.y, shift.z).multiply(R);
 }
 
 function lerpMatrix(m, t) {
@@ -22,10 +49,11 @@ function lerpMatrix(m, t) {
 }
 
 /** World matrices (fold space, before view orientation) for every panel. */
-export function computeFold(geo, { progress = 1, open = 0 } = {}) {
+export function computeFold(geo, { progress = 1, open = 0, thickness = false } = {}) {
   const mats = {};
   const children = {};
   for (const p of geo.panels) if (p.parent) (children[p.parent] ||= []).push(p);
+  const tOf = (p) => (thickness ? (p?.thick ?? geo.ctx?.t ?? 0) : 0);
   const effAngle = (p) => {
     let a = p.angle * progress;
     if (p.openable) a -= open * (p.openRange ?? 110);
@@ -35,7 +63,8 @@ export function computeFold(geo, { progress = 1, open = 0 } = {}) {
     mats[p.id] = M;
     for (const c of children[p.id] || []) {
       if (c.solve && deferSolve) continue;
-      visit(c, M.clone().multiply(hingeMatrix(c, c.solve ? solvedAngle(geo, c, M) * progress : effAngle(c))), deferSolve);
+      const ang = c.solve ? solvedAngle(geo, c, M) * progress : effAngle(c);
+      visit(c, M.clone().multiply(hingeMatrix(c, ang, tOf(p), tOf(c))), deferSolve);
     }
   };
   for (const r of geo.roots) {
@@ -44,17 +73,17 @@ export function computeFold(geo, { progress = 1, open = 0 } = {}) {
     if (r.openLift && open) M = new Matrix4().makeTranslation(r.openLift[0] * open, r.openLift[1] * open, r.openLift[2] * open).multiply(M);
     visit(geo.byId[r.id], M, true);
   }
-  // solved panels (need their target computed)
+  // solved panels (need their target computed on mid-plane folds)
   for (const p of geo.panels) if (p.solve && !mats[p.id] && mats[p.parent]) {
-    const full = progress === 1 && !open ? mats : computeFoldCached(geo);
+    const full = progress === 1 && !open && !thickness ? mats : computeFoldCached(geo);
     const ang = solvedAngle(geo, p, full[p.parent], full);
-    visit(p, mats[p.parent].clone().multiply(hingeMatrix(p, ang * progress)), false);
+    visit(p, mats[p.parent].clone().multiply(hingeMatrix(p, ang * progress, tOf(geo.byId[p.parent]), tOf(p))), false);
   }
   return mats;
 }
 let cacheGeo = null, cacheMats = null;
 function computeFoldCached(geo) {
-  if (cacheGeo !== geo) { cacheMats = computeFold(geo, { progress: 1, open: 0 }); cacheGeo = geo; }
+  if (cacheGeo !== geo) { cacheMats = computeFold(geo, { progress: 1, open: 0, thickness: false }); cacheGeo = geo; }
   return cacheMats;
 }
 function solvedAngle(geo, p, parentM, full) {
@@ -62,7 +91,7 @@ function solvedAngle(geo, p, parentM, full) {
   full = full || computeFoldCached(geo);
   const target = to3(p.solve.targetPoint).applyMatrix4(full[p.solve.target]);
   const pt = to3(p.solve.point);
-  const f = (a) => pt.clone().applyMatrix4(parentM.clone().multiply(hingeMatrix(p, a))).distanceTo(target);
+  const f = (a) => pt.clone().applyMatrix4(parentM.clone().multiply(hingeMid(p, a))).distanceTo(target);
   let best = 0, bv = Infinity;
   for (let a = -180; a <= 180; a += 2) { const v = f(a); if (v < bv) { bv = v; best = a; } }
   let lo = best - 2, hi = best + 2;

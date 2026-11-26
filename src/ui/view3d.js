@@ -155,7 +155,7 @@ export function createView3D(container) {
     }
     const v = geo.view3d; viewM = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler((v.rx * Math.PI) / 180, (v.ry * Math.PI) / 180, 0, 'YXZ'));
     // reference size from the folded state
-    const full = computeFold(geo, { progress: 1 }); const env = foldedBBox(geo, full); radius = Math.max(20, env.size.length() / 2);
+    const full = computeFold(geo, { progress: 1, thickness: true }); const env = foldedBBox(geo, full); radius = Math.max(20, env.size.length() / 2);
     updateTexture(state);
     update();
     if (refit) resetView();
@@ -204,7 +204,7 @@ export function createView3D(container) {
 
   function update() {
     if (!geo) return;
-    const mats = computeFold(geo, { progress: fold, open });
+    const mats = computeFold(geo, { progress: fold, open, thickness: true });
     const env = foldedBBox(geo, mats); const C = env.min.clone().add(env.max).multiplyScalar(0.5);
     for (const m of meshes) {
       const p = m.userData.panel; const M = mats[p.id]; if (!M) continue;
