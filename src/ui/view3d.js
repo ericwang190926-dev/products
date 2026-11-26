@@ -29,6 +29,7 @@ export function createView3D(container) {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.16 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
   const root = new THREE.Group(); scene.add(root);
   let geo = null, meshes = [], tex = null, maskTex = null, fold = 1, open = 0, radius = 100, center0 = new THREE.Vector3(), viewM = new THREE.Matrix4();
+  let showMagnets = false;
   let frontMat = null, backMat = null, bulgeFront = null, bulgeBack = null, ghostFront = null, ghostBack = null;
 
   let userMoved = false;
@@ -64,6 +65,7 @@ export function createView3D(container) {
   }
 
   function setGeometry(g, state, { refit = true } = {}) {
+    if (state && state.showMagnets != null) showMagnets = !!state.showMagnets;
     geo = g;
     for (const m of meshes) { m.traverse?.((ch) => { if (ch.geometry) ch.geometry.dispose(); }); root.remove(m); }
     meshes = [];
@@ -134,7 +136,7 @@ export function createView3D(container) {
       }
       if (!m) continue; m.matrixAutoUpdate = false; m.userData = { panel: p, extra: e, localM }; m.renderOrder = 2; root.add(m); meshes.push(m);
     }
-    const magMat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+    const magMat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, depthTest: false });
     const pointIn = (poly, x, y) => {
       let n = 0; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
         const yi = poly[i][1], yj = poly[j][1], xi = poly[i][0], xj = poly[j][0];
@@ -151,6 +153,7 @@ export function createView3D(container) {
       mesh.matrixAutoUpdate = false;
       mesh.userData = { panel, extra: { type: 'magnet', x: mk.x, y: mk.y } };
       mesh.renderOrder = 3;
+      mesh.visible = showMagnets;
       root.add(mesh); meshes.push(mesh);
     }
     const v = geo.view3d; viewM = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler((v.rx * Math.PI) / 180, (v.ry * Math.PI) / 180, 0, 'YXZ'));
@@ -227,7 +230,9 @@ export function createView3D(container) {
       const half = pt / 2;
       const zOff = new THREE.Matrix4();
       if (m.userData.extra?.type === 'magnet') {
-        zOff.makeTranslation(m.userData.extra.x, -m.userData.extra.y, half + 0.15);
+        // 磁铁内嵌在灰板中面，默认隐藏；打开“显示磁铁位置”时以透视环显示
+        zOff.makeTranslation(m.userData.extra.x, -m.userData.extra.y, 0);
+        m.visible = showMagnets;
       } else if (!m.userData.extra && half) {
         zOff.makeTranslation(0, 0, m.userData.side === 'b' ? -half : half);
       }
@@ -265,5 +270,5 @@ export function createView3D(container) {
     renderer.setPixelRatio(scale); renderer.setSize(w, h, false); renderer.render(scene, camera);
     const url = renderer.domElement.toDataURL('image/png'); renderer.setPixelRatio(pr); renderer.setSize(w, h, false); return url;
   }
-  return { setGeometry, updateTexture, setFold: (p, o) => { fold = p; open = o; update(); }, getFold: () => fold, playFold, resetView, snapshot, renderer };
+  return { setGeometry, updateTexture, setFold: (p, o) => { fold = p; open = o; update(); }, getFold: () => fold, setShowMagnets: (v) => { showMagnets = !!v; update(); }, getShowMagnets: () => showMagnets, playFold, resetView, snapshot, renderer };
 }

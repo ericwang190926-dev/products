@@ -130,27 +130,54 @@ await page.click('.card[data-id="book"]'); await page.waitForTimeout(500);
 await page.click('#useDefaults'); await page.waitForTimeout(500);
 await page.evaluate(() => window.__app.demo()); await page.waitForTimeout(700);
 await setMode('2d'); await page.waitForTimeout(400);
+await page.locator('#v2d').screenshot({ path: `${SHOTS}/book_dieline.png` });
 await page.locator('#v2d').screenshot({ path: `${SHOTS}/book_magnet_dieline.png` });
-await setMode('3d'); await setFold(1, 0.12); await page.waitForTimeout(600);
-await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_long_3d.png` });
-ok('书型盒 defaults to 长边打开 with flap along the long edge', await page.evaluate(() => {
+ok('书型盒 defaults to 长边打开, full-height flap, hidden 3D magnets', await page.evaluate(() => {
   const g = window.__app.geo;
   const flap = g.byId.flap, lid = g.byId.lid;
-  const fh = Math.max(...flap.poly.map((p) => p[1])) - Math.min(...flap.poly.map((p) => p[1]));
+  const span = Math.max(...flap.poly.map((p) => p[1])) - Math.min(...flap.poly.map((p) => p[1]));
   const lh = Math.max(...lid.poly.map((p) => p[1])) - Math.min(...lid.poly.map((p) => p[1]));
-  return g.ctx.p.openDir === 'long' && g.marks.filter((m) => m.type === 'magnet').length === 4 && Math.abs(fh - lh) < 1;
+  const fw = Math.max(...flap.poly.map((p) => p[0])) - Math.min(...flap.poly.map((p) => p[0]));
+  const want = g.ctx.outer.H - g.ctx.p.flapGap;
+  const magLbl = document.querySelector('#lblShowMagnets');
+  const magChk = document.querySelector('#showMagnets');
+  return g.ctx.p.openDir === 'long'
+    && g.marks.filter((m) => m.type === 'magnet').length === 4
+    && Math.abs(span - lh) < 1
+    && Math.abs(fw - want) < 0.2
+    && fw > g.ctx.H * 0.8
+    && magLbl && !magLbl.hidden
+    && magChk && !magChk.checked
+    && window.__app.state.showMagnets === false
+    && /磁铁内嵌在灰板里，外面看不到/.test(document.querySelector('#v2d')?.innerHTML || document.body.innerText);
 }));
+await setMode('3d'); await setFold(1, 0); await page.waitForTimeout(600);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_closed_long_3d.png` });
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_long_3d.png` });
+await setFold(1, 0.5); await page.waitForTimeout(500);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_halfopen_3d.png` });
+ok('显示磁铁位置 toggle works and is off by default', await page.evaluate(() => {
+  const chk = document.querySelector('#showMagnets');
+  return chk && !chk.checked && window.__app.state.showMagnets === false;
+}));
+await page.click('#showMagnets'); await page.waitForTimeout(200);
+ok('显示磁铁位置 can be turned on', await page.evaluate(() => window.__app.state.showMagnets === true));
+await page.click('#showMagnets'); await page.waitForTimeout(200);
 await page.click('#propTabs button[data-tab="struct"]');
 await page.locator('label:has(input[name="openDir"][value="short"])').click();
 await page.waitForTimeout(700);
-await setMode('3d'); await setFold(1, 0.12); await page.waitForTimeout(600);
+await setMode('3d'); await setFold(1, 0); await page.waitForTimeout(600);
+await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_closed_short_3d.png` });
 await page.locator('#v3d').screenshot({ path: `${SHOTS}/book_short_3d.png` });
-ok('书型盒 短边打开 moves flap to the short edge', await page.evaluate(() => {
+ok('书型盒 短边打开 keeps a full-height flap on the short edge', await page.evaluate(() => {
   const g = window.__app.geo;
   const flap = g.byId.flap, lid = g.byId.lid;
-  const fh = Math.max(...flap.poly.map((p) => p[1])) - Math.min(...flap.poly.map((p) => p[1]));
+  const span = Math.max(...flap.poly.map((p) => p[1])) - Math.min(...flap.poly.map((p) => p[1]));
   const lh = Math.max(...lid.poly.map((p) => p[1])) - Math.min(...lid.poly.map((p) => p[1]));
-  return g.ctx.p.openDir === 'short' && Math.abs(fh - lh) < 1 && fh < 150;
+  const fw = Math.max(...flap.poly.map((p) => p[0])) - Math.min(...flap.poly.map((p) => p[0]));
+  const want = g.ctx.outer.H - g.ctx.p.flapGap;
+  return g.ctx.p.openDir === 'short' && Math.abs(span - lh) < 1 && span < 150
+    && Math.abs(fw - want) < 0.2 && fw > g.ctx.H * 0.8;
 }));
 ok('覆膜 options include 触感膜', await page.evaluate(() => /触感膜/.test(document.body.innerText)));
 

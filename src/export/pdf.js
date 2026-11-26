@@ -79,6 +79,7 @@ export function buildPDF(geo, { art = null, info = [], processLayers = [] } = {}
         s += txt(m.x, m.y + m.r + 3, 6, m.text || '磁铁', 'center');
       }
       s += txt(magnets[0].x, magnets[0].y - magnets[0].r - 5, 7, `磁铁位置 ×${magnets.length}`, 'center');
+      s += txt(magnets[0].x, magnets[0].y - magnets[0].r - 10, 6, '磁铁内嵌在灰板里，外面看不到', 'center');
       out.push(`/OC /ocMagnet BDC\n${s}Q\nEMC`);
     }
   }

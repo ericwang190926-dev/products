@@ -193,3 +193,35 @@ test('outsetPoly expands a rectangle by the given margin', () => {
   near(b.h, 104, 1e-6, 'outset h');
   assert.ok(area(o) > 10000, 'area grows');
 });
+
+test('书型盒 包边 reaches the cover bottom on long and short openings', () => {
+  const cases = [
+    { openDir: 'long', dimMode: 'inner', L: 220, W: 120, H: 60 },
+    { openDir: 'short', dimMode: 'inner', L: 220, W: 120, H: 60 },
+    { openDir: 'long', dimMode: 'outer', L: 220, W: 120, H: 60 },
+    { openDir: 'short', dimMode: 'outer', L: 220, W: 120, H: 60 },
+  ];
+  for (const c of cases) {
+    const geo = buildGeometry('book', { ...c, t: 1.9 });
+    const flap = geo.byId.flap, cover = geo.byId.cover;
+    assert.ok(flap && cover, `${c.openDir} ${c.dimMode} panels`);
+    const want = geo.ctx.outer.H - geo.ctx.p.flapGap;
+    near(bbox(flap.poly).w, want, 0.05, `${c.openDir} ${c.dimMode} flapH`);
+    const mats = computeFold(geo, { progress: 1, open: 0, thickness: true });
+    const t = geo.ctx.t;
+    const flapZ = flap.poly.map((q) => to3(q).applyMatrix4(mats[flap.id]).z);
+    const coverPrintZ = cover.poly.map((q) => {
+      const v = to3(q); v.z += t / 2; return v.applyMatrix4(mats[cover.id]).z;
+    });
+    const gap = Math.max(...flapZ) - Math.max(...coverPrintZ);
+    assert.ok(Math.abs(gap) <= 0.12, `${c.openDir} ${c.dimMode} flap-to-bottom gap ${gap.toFixed(4)}`);
+    // Half-open: flap stays attached to the lid (child of flapHinge → lid)
+    const openMats = computeFold(geo, { progress: 1, open: 0.5, thickness: true });
+    const lidHinge = geo.byId.flapHinge;
+    const mid = [(flap.hinge[0][0] + flap.hinge[1][0]) / 2, (flap.hinge[0][1] + flap.hinge[1][1]) / 2];
+    const a = to3(mid).applyMatrix4(openMats[flap.id]);
+    const b = to3(mid).applyMatrix4(openMats[lidHinge.id]);
+    const d = a.distanceTo(b);
+    assert.ok(d <= 0.12, `${c.openDir} half-open flap stays on hinge (${d.toFixed(4)})`);
+  }
+});

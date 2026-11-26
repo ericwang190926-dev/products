@@ -87,6 +87,9 @@ export function createView2D(svg, hooks) {
         for (const m of magnets) {
           o += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${f(m.r)}" stroke="#7c3aed" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="3 2"/><text x="${f(m.x)}" y="${f(m.y + m.r + 3.5)}" font-size="3" fill="#7c3aed" stroke="none" text-anchor="middle">${escX(m.text || '磁铁')}</text>`;
         }
+        const cx = magnets.reduce((a, m) => a + m.x, 0) / magnets.length;
+        const cy = Math.max(...magnets.map((m) => m.y + m.r)) + 7;
+        o += `<text x="${f(cx)}" y="${f(cy)}" font-size="3.2" fill="#7c3aed" stroke="none" text-anchor="middle">磁铁内嵌在灰板里，外面看不到</text>`;
         o += `</g>`;
       }
     }

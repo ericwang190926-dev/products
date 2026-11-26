@@ -30,6 +30,9 @@ export function buildSVG(geo, { artDataUrl = null, processLayers = [] } = {}) {
   if (magnets.length) {
     let mg = '';
     for (const m of magnets) mg += `<circle cx="${f(m.x)}" cy="${f(m.y)}" r="${f(m.r)}" fill="none" stroke="#7c3aed" stroke-width="0.2" stroke-dasharray="0.8 0.8"/><text x="${f(m.x)}" y="${f(m.y + m.r + 3.2)}" font-size="2.6" text-anchor="middle" fill="#7c3aed" font-family='"Noto Sans CJK SC",sans-serif">${m.text || '磁铁'}</text>\n`;
+    const cx = magnets.reduce((a, m) => a + m.x, 0) / magnets.length;
+    const cy = Math.max(...magnets.map((m) => m.y + m.r)) + 7;
+    mg += `<text x="${f(cx)}" y="${f(cy)}" font-size="2.8" text-anchor="middle" fill="#7c3aed" font-family='"Noto Sans CJK SC",sans-serif">磁铁内嵌在灰板里，外面看不到</text>\n`;
     s += L('磁铁位置', mg);
   }
   let lb = geo.panels.map((p) => { const t = p.face ? FACE_NAMES[p.face] : KIND_NAMES[p.kind]; if (!t) return ''; const xs = p.poly.map((q) => q[0]), ys = p.poly.map((q) => q[1]); const sz = Math.max(1.5, Math.min(6, Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 0.18)); return `<text x="${f((Math.max(...xs) + Math.min(...xs)) / 2)}" y="${f((Math.max(...ys) + Math.min(...ys)) / 2)}" font-size="${f(sz)}" text-anchor="middle" dominant-baseline="middle" fill="#666" font-family='"Noto Sans CJK SC",sans-serif'>${t}</text>`; }).join('\n');

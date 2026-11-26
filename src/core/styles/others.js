@@ -62,12 +62,25 @@ export const lidBaseExpect = (c) => {
   return { size: [A2, B2, c.D + c.t] };
 };
 
+
+/** 书型盒包边灰板高度：合上后从封面走到盒底（外高度含板厚，再减去铰缝绕过封面板厚的那一段）。 */
+export function bookFlapGap(t, flapGap) {
+  const g = flapGap == null || flapGap === '' || Number.isNaN(+flapGap)
+    ? Math.round(1.5 * t * 10) / 10
+    : +flapGap;
+  return Math.max(t, g);
+}
+export function bookFullFlapH(c) {
+  return Math.max(12, +(c.outer.H - bookFlapGap(c.t, c.p?.flapGap)).toFixed(2));
+}
+
 // ---------------- 书型盒 book box ----------------
 export function bookBox(c) {
   const { A, B, D, t, p } = c; const b = new Builder();
   const ov = p.overhang; const Lc = A + t + 2 * ov, Wc = B + t + 2 * ov, Hs = D + 1.5 * t;
-  const flapGap = Math.max(t, p.flapGap ?? 1.5 * t);
-  const flapH = clamp(p.flapH, 12, D);
+  const flapGap = bookFlapGap(t, p.flapGap);
+  const fullFlapH = bookFullFlapH(c);
+  const flapH = clamp(p.flapH, 12, fullFlapH);
   const magR = Math.max(3, (p.magnetD ?? 12) / 2);
   // 默认长边打开（更像翻书）；短边打开保留原来从短头掀开的做法
   const shortOpen = p.openDir === 'short';
@@ -101,7 +114,8 @@ export function bookBox(c) {
   const mx = tx + trayA + D - flapH / 2;
   for (const y of ys) b.mark({ type: 'magnet', x: mx, y, r: magR, text: '磁铁', panel: 'tright' });
   b.chains([0, flapH, xLid, xSpine, xBack, xBack + leaf], span, [0, span], 0);
-  b.note(`书型盒：封面与内盒分开做，内盒底粘在封底上；${shortOpen ? '短边' : '长边'}打开，开盒那边有包边，左右各一颗磁铁，合上时包边盖住内盒前墙。`);
+  b.note(`书型盒：封面与内盒分开做，内盒底粘在封底上；${shortOpen ? '短边' : '长边'}打开，开盒那边的包边从封面盖到盒底，左右各一颗磁铁，合上时包边盖住内盒前墙。`);
+  b.note('磁铁内嵌在灰板里，外面看不到。');
   if (!shortOpen) b.view3d = { rx: 90, ry: -90 };
   if (c.wrap) {
     const turn = c.turnIn ?? 15;

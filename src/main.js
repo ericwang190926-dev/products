@@ -28,7 +28,7 @@ const state = {
   boxColor: '#ffffff', boardColor: '#f1ede4', faceColors: {}, elements: [], selected: null, selectedFace: 'front',
   selectedFinish: null, lamination: 'none', finishRegions: [], drawFinish: false, finishUid: 1, dimMode: 'outer',
   layers: { art: true, cut: true, crease: true, bleed: true, glue: true, dims: true, labels: true, finish: true, magnet: true },
-  dimsTouched: false, materialTouched: false, sleeveGhost: false,
+  dimsTouched: false, materialTouched: false, sleeveGhost: false, showMagnets: false,
 };
 function syncMaterial() {
   const r = resolvedThickness(state.mat);
@@ -72,6 +72,11 @@ function rebuild({ refit = false } = {}) {
   const ghostLbl = $('#lblSleeveGhost');
   if (ghostLbl) ghostLbl.hidden = state.styleId !== 'sleeve' || geo.sleeveInner?.innerBox === 'none';
   if ($('#sleeveGhost')) $('#sleeveGhost').checked = !!state.sleeveGhost;
+  const magLbl = $('#lblShowMagnets');
+  const hasMagnets = (geo.marks || []).some((m) => m.type === 'magnet');
+  if (magLbl) magLbl.hidden = !hasMagnets;
+  if ($('#showMagnets')) $('#showMagnets').checked = !!state.showMagnets;
+  view3d.setShowMagnets(!!state.showMagnets);
   renderStruct(); renderArtPanel();
   const st = geo.style; const tag = state.dimMode === 'inner' ? '内尺寸' : '外尺寸'; $('#curStyle').textContent = `${st.name}　|　${tag} ${fmtDims()} mm　|　${materialShort(state.mat, state.t)}`;
   document.querySelectorAll('.card').forEach((c) => c.classList.toggle('on', c.dataset.id === state.styleId));
@@ -108,6 +113,8 @@ function selectStyle(id) {
   if (!state.materialTouched) { state.mat = defaultMaterialFor(id); syncMaterial(); }
   state.sleeveGhost = false;
   if ($('#sleeveGhost')) $('#sleeveGhost').checked = false;
+  state.showMagnets = false;
+  if ($('#showMagnets')) $('#showMagnets').checked = false;
   if ($('#open')) $('#open').value = id === 'sleeve' ? '0.4' : '0';
   rebuild({ refit: true });
 }
@@ -596,6 +603,10 @@ $('#sleeveGhost').addEventListener('change', () => {
   state.sleeveGhost = $('#sleeveGhost').checked;
   view3d.setGeometry(geo, state, { refit: false });
   view3d.setFold(+$('#fold').value, +$('#open').value);
+});
+$('#showMagnets').addEventListener('change', () => {
+  state.showMagnets = $('#showMagnets').checked;
+  view3d.setShowMagnets(state.showMagnets);
 });
 
 // ---------------- export / project ----------------

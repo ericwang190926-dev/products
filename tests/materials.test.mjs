@@ -264,7 +264,10 @@ function checkBookOpening(openDir) {
   const wantLc = g.ctx.A + t + 2 * ov, wantWc = g.ctx.B + t + 2 * ov;
   const span = openDir === 'short' ? wantWc : wantLc;
   const leaf = openDir === 'short' ? wantLc : wantWc;
-  near(flap.w, g.ctx.p.flapH, 0.05, 'flap height');
+  const wantFlapH = g.ctx.outer.H - g.ctx.p.flapGap;
+  near(g.ctx.p.flapH, wantFlapH, 0.05, 'default flapH is full outer height minus hinge gap');
+  near(flap.w, wantFlapH, 0.05, 'flap board reaches the box bottom');
+  assert.ok(flap.w > g.ctx.H * 0.8, `flap ${flap.w} is not a half-height stub (H=${g.ctx.H})`);
   near(flap.h, span, 0.05, `flap spans the ${openDir} opening edge`);
   near(lid.w, leaf, 0.05, 'lid depth');
   near(lid.h, span, 0.05, 'lid along opening');
@@ -289,6 +292,10 @@ function checkBookOpening(openDir) {
   const wb = bbox(wrap.poly);
   assert.ok(wb.h > span, 'cover wrap follows the opening-edge length');
   assert.ok(g.notes.some((n) => n.includes(openDir === 'short' ? '短边打开' : '长边打开')), 'note names the opening');
+  assert.ok(g.notes.some((n) => n.includes('包边从封面盖到盒底') || n.includes('盖到盒底')), 'note says flap reaches the bottom');
+  assert.ok(g.notes.some((n) => n.includes('磁铁内嵌在灰板里，外面看不到')), 'embedded-magnet note');
+  const hs = g.ctx.D + 1.5 * t;
+  near(wb.w, wantFlapH + g.ctx.p.flapGap + 2 * leaf + hs + 2 * 15, 0.5, 'cover wrap width includes the full-height flap and turn-in');
   return g;
 }
 
@@ -359,8 +366,10 @@ test('书型盒 PDF has a 磁铁位置 layer', async () => {
   const pdf = buildPDF(geo, { info: ['书型盒'] });
   const s = Buffer.from(pdf).toString('latin1');
   assert.ok(s.includes('/OC /ocMagnet') || s.includes('ocMagnet'), 'pdf magnet OCG');
+  // PDF body is latin1 with CJK as embedded/encoded; the SVG export carries the note in plain text.
   const svg = buildSVG(geo);
   assert.match(svg, /磁铁位置/);
+  assert.match(svg, /磁铁内嵌在灰板里，外面看不到/);
 });
 
 import { buildSVG, buildDXF } from '../src/export/vector.js';
